@@ -1,0 +1,135 @@
+/*large premium case, pending inventory volume*/
+
+WITH vitalDates AS (
+	SELECT '2022-12-12'::DATE AS targetDate
+),
+aggs AS (
+	SELECT pif.inventory_status_nm AS invStatus
+  ,Case when pif.inventory_status_nm ='Submitted, Not Approved' then 1 	
+	when pif.inventory_status_nm ='Approved, Not Issued' then 2 
+	when pif.inventory_status_nm='Issued, Not Reported' then 3 
+	when pif.inventory_status_nm='Reported' then 4 
+	when pif.inventory_status_nm='Not Taken' then 5 
+	when pif.inventory_status_nm='Incomplete/Withdrawn' then 6 
+	when pif.inventory_status_nm='Declined' then 7 
+	when pif.inventory_status_nm='N/A' then 8 end as displayOrder
+		, SUM(CASE WHEN pif.calendar_dt = vd.targetDate THEN policy_cnt ELSE 0 END) AS currentCount
+		, SUM(CASE WHEN pif.calendar_dt = TIMESTAMPADD('YEAR',-1,vd.targetDate) THEN policy_cnt ELSE 0 END) AS priorYearCount
+		, SUM(CASE WHEN pif.calendar_dt = vd.targetDate AND pif.pending_day_cnt BETWEEN '0' AND '30' THEN policy_cnt ELSE 0 END) AS age0to30
+		, SUM(CASE WHEN pif.calendar_dt = vd.targetDate AND pif.pending_day_cnt BETWEEN  '31' AND '60' THEN policy_cnt ELSE 0 END) AS age31to60
+		, SUM(CASE WHEN pif.calendar_dt = vd.targetDate AND pif.pending_day_cnt >'60' THEN policy_cnt ELSE 0 END) AS age61
+	FROM edw_new_business_vw.fact_life_pending_inventory_vw       pif 
+		INNER JOIN edw_bi_analytics_vw.dim_date_vw  isd ON isd.calendar_dt = pif.calendar_dt
+		INNER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= pif.dim_channel_natural_key_hash_uuid
+		INNER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw 		     prod ON prod.ref_non_standard_product_natural_key_hash_uuid = pif.ref_non_standard_product_natural_key_hash_uuid
+    	INNER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw     pr ON pr.ref_non_standard_band_range_natural_key_hash_uuid = pif.ref_non_standard_premium_band_natural_key_hash_uuid 
+		--and pr.band_range_type_nm = 'Premium Range Band'
+		INNER JOIN vitalDates                              vd ON 1=1
+	WHERE pif.inventory_status_nm IN ('Approved, Not Issued', 'Issued, Not Reported', 'Submitted, Not Approved')
+		AND pr.band_range_display_order_val > 0
+		AND prod.product_type_cde = 'Whole Life'
+            and pif.distribution_channel_cde = 'DTC'
+         --and chan.channel_nm = 'Coverpath'	
+	GROUP BY 1
+),
+total AS (
+	SELECT 
+	SUM(currentCount)  currentCount 
+		, SUM(priorYearCount) priorYearCount
+		, SUM(age0to30)       age0to30
+		, SUM(age31to60)      age31to60
+		, SUM(age61)          age61
+	FROM aggs
+)
+SELECT displayOrder, 
+	invStatus
+	, currentCount
+	, priorYearCount
+	, age0to30
+	, age31to60
+	, age61
+FROM aggs
+UNION ALL
+SELECT 4 AS displayOrder ,
+'Total' AS invStatus
+	, currentCount
+	, priorYearCount
+	, age0to30
+	, age31to60
+	, age61
+FROM total
+ORDER BY 1;
+
+/*large premium cases, pending inventory weighted premium*/
+WITH vitalDates AS (
+	SELECT '2022-12-12'::DATE AS targetDate
+),
+aggs AS (
+	SELECT pif.inventory_status_nm AS invStatus
+,Case when inventory_status_nm ='Submitted, Not Approved' then 1 	
+	when inventory_status_nm ='Approved, Not Issued' then 2 
+	when inventory_status_nm='Issued, Not Reported' then 3 
+	when inventory_status_nm='Reported' then 4 
+	when inventory_status_nm='Not Taken' then 5 
+	when inventory_status_nm='Incomplete/Withdrawn' then 6 
+	when inventory_status_nm='Declined' then 7 
+	when inventory_status_nm='N/A' then 8 end as displayOrder
+		, SUM(CASE WHEN pif.calendar_dt = vd.targetDate THEN weighted_premium_nr ELSE 0 END) AS currentCount
+		, SUM(CASE WHEN pif.calendar_dt = TIMESTAMPADD('YEAR',-1,vd.targetDate) THEN weighted_premium_nr ELSE 0 END) AS priorYearCount
+		, SUM(CASE WHEN pif.calendar_dt = vd.targetDate AND pif.pending_day_cnt BETWEEN '0' AND '30' THEN weighted_premium_nr ELSE 0 END) AS age0to30
+		, SUM(CASE WHEN pif.calendar_dt = vd.targetDate AND pif.pending_day_cnt BETWEEN  '31' AND '60' THEN weighted_premium_nr ELSE 0 END) AS age31to60
+		, SUM(CASE WHEN pif.calendar_dt = vd.targetDate AND pif.pending_day_cnt >'60' THEN weighted_premium_nr ELSE 0 END) AS age61
+	FROM edw_new_business_vw.fact_life_pending_inventory_vw       pif 
+		INNER JOIN edw_bi_analytics_vw.dim_date_vw  isd ON isd.calendar_dt = pif.calendar_dt
+		INNER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= pif.dim_channel_natural_key_hash_uuid
+		INNER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw 		     prod ON prod.ref_non_standard_product_natural_key_hash_uuid = pif.ref_non_standard_product_natural_key_hash_uuid
+        INNER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw     pr ON pr.ref_non_standard_band_range_natural_key_hash_uuid = pif.ref_non_standard_premium_band_natural_key_hash_uuid 
+		INNER JOIN vitalDates                              vd ON 1=1
+	WHERE pif.inventory_status_nm IN ('Approved, Not Issued', 'Issued, Not Reported', 'Submitted, Not Approved')
+		AND pr.band_range_display_order_val > 0
+		AND prod.product_type_cde = 'Whole Life'
+	GROUP BY 1
+),
+total AS (
+	SELECT 
+      SUM(currentCount)  currentCount
+		, SUM(priorYearCount) priorYearCount
+		, SUM(age0to30)       age0to30
+		, SUM(age31to60)      age31to60
+		, SUM(age61)          age61
+	FROM aggs
+)
+SELECT  displayOrder,invStatus
+	, ROUND( currentCount/1000000,2)
+	, ROUND( priorYearCount/1000000,2)
+	, ROUND( age0to30/1000000,2)
+	, ROUND( age31to60/1000000,2)
+	, ROUND( age61/1000000,2)
+FROM aggs
+UNION ALL
+SELECT 4 AS displayOrder , 'Total' AS invStatus
+	, round(currentCount/1000000,2)
+	, round(priorYearCount/1000000,2)
+	, round(age0to30/1000000,2)
+	, round(age31to60/1000000,2)
+	, round(age61/1000000,2)
+FROM total
+ORDER BY 1;							
+							
+							
+							
+							
+							
+							
+							
+							
+							
+						
+						
+						
+						
+						
+						
+						
+						
+						

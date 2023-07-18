@@ -1,0 +1,142 @@
+/*New business cycle time*/
+
+WITH vitalDates AS (
+    SELECT '2023-06-20'::DATE AS targetDate
+),
+years AS (
+    SELECT DATE_PART('YEAR', targetDate) AS theYear
+    FROM vitalDates
+    UNION ALL
+    SELECT DATE_PART('YEAR', TIMESTAMPADD('YEAR', -1, targetDate)) AS theYear
+    FROM vitalDates
+),
+decline AS (
+    SELECT DATE_PART('YEAR',sub.calendar_dt)           AS theYear
+        , AVG(lpf.sign_to_declined_nr)        AS signedToDecline
+    FROM edw_new_business_vw.fact_life_policy_vw      lpf
+        INNER JOIN edw_semantic_vw.sem_channel_nb_current_vw  chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid
+        INNER JOIN  edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+        INNER JOIN edw_bi_analytics_vw.dim_date_vw    sub ON sub.calendar_dt = lpf.application_declined_dt 	
+        INNER JOIN vitalDates                     vd ON 1=1
+    WHERE sub.calendar_dt BETWEEN DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR', -1, vd.targetDate)) AND vd.targetDate
+         AND prod.product_type_cde <> 'ROP'
+         AND lpf.application_type_nm <> 'Informal'
+         --AND lpf.distributor_channel_cde = 'MMSD'
+         --AND chan.channel_nm = 'Coverpath'
+         --AND prod.product_type_cde = 'Whole Life'
+    GROUP BY 1
+),
+approved AS (
+    SELECT DATE_PART('YEAR',sub.calendar_dt)    AS theYear
+        , AVG(lpf.received_to_approved_nr) AS signedToApproved
+    FROM edw_new_business_vw.fact_life_policy_vw      lpf
+        INNER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid
+        INNER JOIN  edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+        INNER JOIN edw_bi_analytics_vw.dim_date_vw    sub ON sub.calendar_dt = lpf.application_approval_dt 	
+        INNER JOIN vitalDates                     vd ON 1=1
+   WHERE sub.calendar_dt BETWEEN DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR', -1, vd.targetDate)) AND vd.targetDate
+         AND prod.product_type_cde <> 'ROP'
+         AND lpf.application_type_nm <> 'Informal'  
+         --AND lpf.distributor_channel_cde = 'MMSD'
+         --AND chan.channel_nm = 'Coverpath'
+         --AND prod.product_type_cde = 'Whole Life'
+    GROUP BY 1
+),
+issued AS (
+    SELECT DATE_PART('YEAR',sub.calendar_dt)  AS theYear
+        , AVG(lpf.approved_to_issued_nr )       AS approvedToIssued
+        , AVG(lpf.received_to_issues_nr) AS signedToIssue
+    FROM edw_new_business_vw.fact_life_policy_vw      lpf
+        INNER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid
+        INNER JOIN  edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+        INNER JOIN edw_bi_analytics_vw.dim_date_vw    sub ON sub.calendar_dt = lpf.application_issue_dt 	
+        INNER JOIN vitalDates                     vd ON 1=1
+    WHERE sub.calendar_dt BETWEEN DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR', -1, vd.targetDate)) AND vd.targetDate
+         AND prod.product_type_cde <> 'ROP'
+         AND lpf.application_type_nm <> 'Informal'  
+         --AND lpf.distributor_channel_cde = 'MMSD'
+         --AND chan.channel_nm = 'Coverpath'
+         --AND prod.product_type_cde = 'Whole Life'
+    GROUP BY 1
+),
+reported AS (
+    SELECT DATE_PART('YEAR', sub.calendar_dt) AS theYear
+     , AVG(lpf.issued_to_reported_nr)         AS signedToReported
+     , AVG(lpf.sign_to_reported_nr)     AS signToReported
+        -- ,sum(lpf.issued_to_reported_nr)  /count(lpf.issued_to_reported_nr) AS "signedToReported",
+         -- sum(lpf.sign_to_reported_nr) / count(lpf.sign_to_reported_nr) AS "signToReported"
+    FROM edw_new_business_vw.fact_life_policy_vw      lpf
+        INNER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid
+        INNER JOIN  edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+        INNER JOIN edw_bi_analytics_vw.dim_date_vw    sub ON sub.calendar_dt = lpf.application_report_dt 	
+        INNER JOIN vitalDates                     vd ON 1=1
+    WHERE /*sub.calendar_dt*/ lpf.application_report_dt/* between (YEAR('2022-12-19'::DATE)-1|| '-01-01' ) ::Date and '2022-12-19' */BETWEEN DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR', -1, vd.targetDate)) AND vd.targetDate
+         AND prod.product_type_cde <> 'ROP'
+         AND lpf.application_type_nm <> 'Informal'
+         --AND lpf.distributor_channel_cde = 'MMSD'
+         --AND chan.channel_nm = 'Coverpath'
+         --AND prod.product_type_cde = 'Whole Life'
+    GROUP BY 1
+)
+SELECT yrs.theYear
+    , ROUND(dcl.signedToDecline,2) as signedToDecline
+    , ROUND(app.signedToApproved,2) as signedToApproved
+    , ROUND(iss.approvedToIssued,2) as approvedToIssued
+    , ROUND(rep.signedToReported,2) as SignedToReported
+    , ROUND(iss.signedToIssue,2) as SignedToIssued
+    , ROUND(rep.signToReported,2) as SignToReported
+FROM years yrs
+    LEFT OUTER JOIN decline  dcl ON yrs.theYear = dcl.theYear
+    LEFT OUTER JOIN approved app ON yrs.theYear = app.theYear
+    LEFT OUTER JOIN issued   iss ON yrs.theYear = iss.theYear
+    LEFT OUTER JOIN reported rep ON yrs.theYear = rep.theYear
+ORDER BY 1;
+
+----------------------------------------------
+----------------------------------------------
+
+
+/*Risk class distribution*/
+
+WITH vitalDates AS (
+SELECT '2023-06-20'::DATE AS targetDate
+),
+aggs as
+(SELECT 
+lpf.final_risk_class_nm AS finalRiskClass
+,COUNT(CASE WHEN iss.calendar_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) AS ytd_actual
+,COUNT(CASE WHEN iss.calendar_dt BETWEEN (ADD_MONTHS(vd.targetDate,-12 ) ::Date+1) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) AS rolling_12_mo
+,COUNT(CASE WHEN TIMESTAMPADD('YEAR',1,iss.calendar_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) AS py_ytd_actual
+FROM
+edw_new_business_vw.fact_life_policy_vw lpf
+LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw iss ON iss.calendar_dt = lpf.application_issue_dt
+JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+LEFT OUTER JOIN vitalDates vd ON 1=1
+WHERE 
+prod.product_type_cde <> 'ROP'
+AND lpf.application_type_nm <>'Informal'
+AND lpf.insured_age_nr >= 16.5
+AND lpf.reporting_status_nm not in ('Declined')
+AND lpf.final_risk_class_nm IN ('Ultra Preferred','Select Preferred','Standard','Table Rated')
+AND lpf.distributor_channel_cde <> 'DTC'
+GROUP BY 1),
+total AS (
+SELECT SUM(ytd_actual) AS ytd_actual
+, SUM(rolling_12_mo) AS rolling_12_mo
+, SUM(py_ytd_actual) AS py_ytd_actual
+FROM aggs
+)
+SELECT CASE a.finalRiskClass
+WHEN 'Ultra Preferred' THEN 1
+WHEN 'Select Preferred' THEN 2
+WHEN 'Standard' THEN 3
+WHEN 'Table Rated' THEN 4
+END AS sortOrder
+, a.finalRiskClass
+, ROUND((a.rolling_12_mo/NULLIFZERO(t.rolling_12_mo))*100,2) AS rolling_12_mo
+, ROUND((a.ytd_actual/NULLIFZERO(t.ytd_actual))*100,2) AS ytd_actual
+, ROUND(ZEROIFNULL((a.py_ytd_actual/NULLIFZERO(t.py_ytd_actual)))*100,2) AS ytd_py
+, ROUND((a.ytd_actual/NULLIFZERO(t.ytd_actual) - ZEROIFNULL((a.py_ytd_actual/NULLIFZERO(t.py_ytd_actual))))*100,2) AS ytd_vs_py
+FROM aggs a
+INNER JOIN total t ON 1=1
+ORDER BY 1;

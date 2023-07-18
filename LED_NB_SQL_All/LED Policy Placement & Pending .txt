@@ -1,0 +1,226 @@
+----------- LED Policy Placement page
+
+/*Policy Placement, % counts*/
+WITH vitalDates AS (
+	SELECT '2022-12-21'::DATE AS targetDate
+),
+aggs AS (
+	SELECT lpf.reporting_status_nm
+		  --, rs.reportingStatusDisplayOrder
+		  ,Case when reporting_status_nm ='Submitted, Not Approved' then 1     
+    when reporting_status_nm ='Approved, Not Issued' then 2 
+    when reporting_status_nm='Issued, Not Reported' then 3 
+    when reporting_status_nm='Reported' then 4 
+    when reporting_status_nm='Not Taken' then 7 
+    when reporting_status_nm='Incomplete/Withdrawn' then 5 
+    when reporting_status_nm='Declined' then 6 
+    when reporting_status_nm='N/A' then 8 end as displayOrder
+        , COUNT(CASE WHEN rep.calendar_dt BETWEEN TIMESTAMPADD('YEAR',-1,vd.targetDate)+1 AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) AS one_yr_actual
+		--, COUNT(DISTINCT CASE WHEN lpf.reporting_status_dt BETWEEN TIMESTAMPADD('YEAR',-1,vd.targetDate) AND vd.targetDate THEN lpf.applID ELSE NULL END) AS one_yr_actual--test
+        , COUNT(CASE WHEN rep.calendar_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) AS ytd_actual
+		, COUNT(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.reporting_status_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) AS py_ytd_actual
+	FROM edw_new_business_vw.fact_life_policy_vw    lpf 	
+	    LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw   rep ON rep.calendar_dt = lpf.reporting_status_dt
+--	    LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON prod.product_type_cde = lpf.product_type_cde	
+    	LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid
+	    LEFT OUTER JOIN vitalDates                             vd ON 1=1
+	WHERE lpf.product_type_cde <> 'ROP' AND
+		 lpf.reporting_status_nm  IN ('Reported','Incomplete/Withdrawn','Declined','Not Taken')
+		and lpf.application_type_nm  <> 'Informal'
+		--AND lpf.distributionChannel = 'MMSD'
+		--AND chan.channelType = 'MMDirect'
+		--AND prod.productType ='Whole Life'
+	   GROUP BY 1
+	--select * from edw_bi_analytics_vw.dimChannel
+),
+total AS (
+	SELECT SUM(one_yr_actual) AS one_yr_actual
+		, SUM(ytd_actual)     AS ytd_actual
+		, SUM(py_ytd_actual)  AS py_ytd_actual
+	FROM aggs
+)
+SELECT a.displayOrder,--a.reportingStatusDisplayOrder --DON'T LOOK AT THIS, IT'S JUST FOR ORDERING
+	  a.reporting_status_nm
+	, ROUND((a.one_yr_actual/NULLIFZERO(t.one_yr_actual))*100,2) AS one_yr_actual
+	, ROUND((a.ytd_actual/NULLIFZERO(t.ytd_actual))*100,2)       AS ytd_actual
+	, ROUND((a.py_ytd_actual/NULLIFZERO(t.py_ytd_actual))*100,2)  AS py_ytd_actual
+FROM aggs a
+	INNER JOIN total t ON 1=1
+ORDER BY 1;
+
+
+
+/*Policy Placement, % premium*/
+WITH vitalDates AS (
+	SELECT '2022-12-21'::DATE AS targetDate
+),
+aggs AS (
+	SELECT lpf.reporting_status_nm
+		--, rs.reportingStatusDisplayOrder
+		 ,Case when reporting_status_nm ='Submitted, Not Approved' then 1     
+    when reporting_status_nm ='Approved, Not Issued' then 2 
+    when reporting_status_nm='Issued, Not Reported' then 3 
+    when reporting_status_nm='Reported' then 4 
+    when reporting_status_nm='Not Taken' then 7 
+    when reporting_status_nm='Incomplete/Withdrawn' then 5 
+    when reporting_status_nm='Declined' then 6 
+    when reporting_status_nm='N/A' then 8 end as displayOrder
+		, SUM(CASE WHEN rep.calendar_dt BETWEEN TIMESTAMPADD('YEAR',-1,vd.targetDate)+1 AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) AS one_yr_actual
+		, SUM(CASE WHEN rep.calendar_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) AS ytd_actual
+		, SUM(CASE WHEN TIMESTAMPADD('YEAR',1,rep.calendar_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) AS py_ytd_actual
+	FROM edw_new_business_vw.fact_life_policy_vw    lpf 	
+	    LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw   rep ON rep.calendar_dt = lpf.reporting_status_dt
+--	    LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON prod.product_type_cde = lpf.product_type_cde	
+    	LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid
+	    LEFT OUTER JOIN vitalDates                             vd ON 1=1
+	WHERE lpf.product_type_cde <> 'ROP'
+	--and lpf.distributionChannel='MMSD'
+		AND lpf.reporting_status_nm IN ('Reported','Incomplete/Withdrawn','Declined','Not Taken')
+		--AND prod.productType ='Whole Life'
+		--AND chan.channelType = 'MMDirect'
+	GROUP BY 1	
+),
+total AS (
+	SELECT SUM(one_yr_actual) AS one_yr_actual
+		, SUM(ytd_actual)     AS ytd_actual
+		, SUM(py_ytd_actual)  AS py_ytd_actual
+	FROM aggs
+)
+SELECT a.displayOrder--DON'T LOOK AT THIS, IT'S JUST FOR ORDERING
+	  ,a.reporting_status_nm
+	, ROUND((a.one_yr_actual/t.one_yr_actual)*100,2)  AS one_yr_actual
+	, ROUND((a.ytd_actual/t.ytd_actual)*100,2)       AS ytd_actual
+	, ROUND((a.py_ytd_actual/t.py_ytd_actual)*100,2)  AS py_ytd_actual
+FROM aggs a
+	INNER JOIN total t ON 1=1
+ORDER BY 1;				
+
+
+
+
+/*Pending Inventory Volume*/
+WITH vitalDates AS (
+	SELECT '2022-12-21'::DATE AS targetDate
+),
+aggs AS (
+	SELECT pif.inventory_status_nm AS invStatus
+		--, dis.displayOrder 
+,Case when inventory_status_nm ='Submitted, Not Approved' then 1 	
+	when inventory_status_nm ='Approved, Not Issued' then 2 
+	when inventory_status_nm='Issued, Not Reported' then 3 
+	when inventory_status_nm='Reported' then 4 
+	when inventory_status_nm='Not Taken' then 5 
+	when inventory_status_nm='Incomplete/Withdrawn' then 6 
+	when inventory_status_nm='Declined' then 7 
+	when inventory_status_nm='N/A' then 8 end as displayOrder
+		, SUM(CASE WHEN inv.calendar_dt = vd.targetDate THEN policy_cnt ELSE 0 END) AS currentCount
+		, SUM(CASE WHEN inv.calendar_dt = TIMESTAMPADD('YEAR',-1,vd.targetDate) THEN policy_cnt ELSE 0 END) AS priorYearCount
+		, SUM(CASE WHEN inv.calendar_dt = vd.targetDate AND pif.pending_day_cnt BETWEEN '0' AND '30' THEN policy_cnt ELSE 0 END) AS age0to30
+		, SUM(CASE WHEN inv.calendar_dt = vd.targetDate AND pif.pending_day_cnt BETWEEN '31' AND '60' THEN policy_cnt ELSE 0 END) AS age31to60
+		, SUM(CASE WHEN inv.calendar_dt = vd.targetDate AND pif.pending_day_cnt >'60' THEN policy_cnt ELSE 0 END) AS age61
+		, SUM(CASE WHEN inv.calendar_dt = vd.targetDate AND chan.channel_nm in ('Coverpath','Haven Life','LifeBridge','MMDirect') THEN policy_cnt ELSE 0 END) AS coverpath
+	FROM edw_new_business_vw.fact_life_pending_inventory_vw         pif 
+	      LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw inv ON inv.calendar_dt = pif.calendar_dt 
+	      LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= pif.dim_channel_natural_key_hash_uuid
+		LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw   prod ON prod.ref_non_standard_product_natural_key_hash_uuid = pif.ref_non_standard_product_natural_key_hash_uuid 
+		INNER JOIN vitalDates                              vd ON 1=1
+	WHERE pif.inventory_status_nm in ('Approved, Not Issued', 'Issued, Not Reported', 'Submitted, Not Approved')
+	--and prod.businessType  <> 'Informal'
+	--and pif.distribution_channel_cde='MMSD'
+	--AND chan.channel_nm = 'LifeBridge'
+	  --AND prod.product_type_cde = 'Whole Life'
+	GROUP BY 1
+),
+total AS (
+	SELECT SUM(currentCount)  AS currentCount
+		, SUM(priorYearCount) AS priorYearCount
+		, SUM(age0to30)       AS age0to30
+		, SUM(age31to60)      AS age31to60
+		, SUM(age61)          AS age61
+		, SUM(coverpath)      AS coverpath
+	FROM aggs
+)
+SELECT displayOrder
+	, invStatus
+	, currentCount
+	, priorYearCount
+	, age0to30
+	, age31to60
+	, age61
+	, ROUND((coverpath / NULLIFZERO(currentCount))*100,2) ||'%' AS coverpath
+FROM aggs
+UNION ALL
+SELECT 4 AS displayOrder
+	, 'Total' AS invStatus
+	, currentCount
+	, priorYearCount
+	, age0to30
+	, age31to60
+	, age61
+	, ROUND((coverpath / NULLIFZERO(currentCount))*100,2) ||'%' AS coverpath
+FROM total
+ORDER BY 1;
+
+
+
+
+
+/*Pending Inventory Premium*/
+WITH vitalDates AS (
+	SELECT '2022-12-21'::DATE AS targetDate
+),
+aggs AS (
+	SELECT pif.inventory_status_nm AS invStatus
+		--, dis.displayOrder 
+,Case when inventory_status_nm ='Submitted, Not Approved' then 1 	
+	when inventory_status_nm ='Approved, Not Issued' then 2 
+	when inventory_status_nm='Issued, Not Reported' then 3 
+	when inventory_status_nm='Reported' then 4 
+	when inventory_status_nm='Not Taken' then 5 
+	when inventory_status_nm='Incomplete/Withdrawn' then 6 
+	when inventory_status_nm='Declined' then 7 
+	when inventory_status_nm='N/A' then 8 end as displayOrder
+		, SUM(CASE WHEN inv.calendar_dt = vd.targetDate THEN weighted_premium_nr ELSE 0 END) AS currentCount
+		, SUM(CASE WHEN inv.calendar_dt = TIMESTAMPADD('YEAR',-1,vd.targetDate) THEN weighted_premium_nr ELSE 0 END) AS priorYearCount
+		, SUM(CASE WHEN inv.calendar_dt = vd.targetDate AND pif.pending_day_cnt BETWEEN '0' AND '30' THEN weighted_premium_nr ELSE 0 END) AS age0to30
+		, SUM(CASE WHEN inv.calendar_dt = vd.targetDate AND pif.pending_day_cnt BETWEEN '31' AND '60' THEN weighted_premium_nr ELSE 0 END) AS age31to60
+		, SUM(CASE WHEN inv.calendar_dt = vd.targetDate AND pif.pending_day_cnt >'60' THEN weighted_premium_nr ELSE 0 END) AS age61
+		, SUM(CASE WHEN inv.calendar_dt = vd.targetDate AND chan.channel_nm in ('Coverpath','Haven Life','LifeBridge','MMDirect') THEN weighted_premium_nr ELSE 0 END) AS coverpath
+	FROM edw_new_business_vw.fact_life_pending_inventory_vw         pif 
+	      INNER JOIN edw_bi_analytics_vw.dim_date_vw inv ON inv.calendar_dt = pif.calendar_dt 
+	      INNER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= pif.dim_channel_natural_key_hash_uuid
+		INNER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw   prod ON prod.ref_non_standard_product_natural_key_hash_uuid = pif.ref_non_standard_product_natural_key_hash_uuid 
+		INNER JOIN vitalDates                              vd ON 1=1
+	WHERE pif.inventory_status_nm in  ('Approved, Not Issued', 'Issued, Not Reported', 'Submitted, Not Approved')
+	GROUP BY 1,2
+),
+total AS (
+	SELECT SUM(currentCount)  AS currentCount
+		, SUM(priorYearCount) AS priorYearCount
+		, SUM(age0to30)       AS age0to30
+		, SUM(age31to60)      AS age31to60
+		, SUM(age61)          AS age61
+		, SUM(coverpath)      AS coverpath
+	FROM aggs
+)
+SELECT displayOrder
+	, invStatus
+	, '$' || ROUND(currentCount/1000000,2) || 'M' as currentCount
+	, '$' || ROUND(priorYearCount/1000000,2) || 'M' as priorYearCount
+	, '$' || ROUND(age0to30/1000000,2) || 'M' as age0to30
+	, '$' || ROUND(age31to60/1000000,2) || 'M' as age31to60
+	, '$' || ROUND(age61/1000000,2) || 'M' as age61
+	,  ROUND((coverpath / currentCount)*100,2) || '%' AS coverpath
+FROM aggs
+UNION ALL
+SELECT 4 AS displayOrder
+	, 'Total' AS invStatus
+	, '$' || ROUND(currentCount/1000000,2) || 'M' as currentCount
+	, '$' || ROUND(priorYearCount/1000000,2) || 'M' as priorYearCount
+	, '$' || ROUND(age0to30/1000000,2) || 'M' as age0to30
+	, '$' || ROUND(age31to60/1000000,2) || 'M' as age31to60
+	, '$' || ROUND(age61/1000000,2) || 'M' as age61
+	,  ROUND((coverpath / currentCount)*100,2) || '%' AS coverpath
+FROM total
+ORDER BY 1;
+

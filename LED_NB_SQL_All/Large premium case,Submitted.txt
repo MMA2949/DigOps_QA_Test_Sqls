@@ -1,0 +1,311 @@
+--Large WL Cases Submitted
+WITH vitalDates AS (
+	SELECT '2023-01-12'::DATE AS targetDate
+),
+aggs AS (
+	SELECT pr.band_range_val AS premiumRange
+		, COUNT(CASE WHEN sub.calendar_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) AS mtd_actual
+		, COUNT(CASE WHEN TIMESTAMPADD('YEAR',1,sub.calendar_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) AS py_mtd_actual
+		, COUNT(CASE WHEN sub.calendar_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) AS ytd_actual
+		, COUNT(CASE WHEN TIMESTAMPADD('YEAR',1,sub.calendar_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) AS py_ytd_actual
+	FROM edw_new_business_vw.fact_life_policy_vw              lpf 
+           LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw    sub ON sub.calendar_dt = lpf.application_submit_dt
+           LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid	
+	       LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON  prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+    	   LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw pr ON lpf.ref_non_standard_premium_band_natural_key_hash_uuid = pr.ref_non_standard_band_range_natural_key_hash_uuid
+	       AND band_range_type_nm = 'Premium Range Band'
+    	   LEFT OUTER JOIN vitalDates                       vd ON 1=1
+	WHERE  prod.product_type_cde <> 'ROP'
+		AND pr.band_range_display_order_val > 0
+		AND prod.product_type_cde = 'Whole Life'
+		AND lpf.application_type_nm <> 'Informal'
+         and lpf.distributor_channel_cde = 'MMSD'
+         --and chan.channel_nm = 'MMDirect'
+	GROUP BY 1
+),
+total AS (
+	SELECT SUM(mtd_actual)   AS mtd_actual
+		, SUM(py_mtd_actual) AS py_mtd_actual
+		, SUM(ytd_actual)    AS ytd_actual
+		, SUM(py_ytd_actual) AS py_ytd_actual
+	FROM aggs
+)
+SELECT CASE premiumRange
+		WHEN '$50,000-$99,999'   THEN 1
+		WHEN '$100,000-$249,999' THEN 2
+		WHEN '$250,000+'         THEN 3
+	END AS sortOrder --DON'T LOOK AT THIS, IT'S JUST FOR ORDERING
+	, premiumRange
+	, mtd_actual
+	, py_mtd_actual
+	, ROUND( ((mtd_actual - py_mtd_actual) /NULLIFZERO (py_mtd_actual))*100,2) AS mtd_vs_py
+	, ytd_actual
+	, py_ytd_actual
+	, ROUND( ((ytd_actual - py_ytd_actual) /NULLIFZERO (py_ytd_actual))*100,2) AS ytd_vs_py
+FROM aggs
+UNION ALL 
+SELECT 5      AS sortOrder
+	, 'Total' AS premiumRange
+	, mtd_actual
+	, py_mtd_actual
+	, ROUND( ((mtd_actual - py_mtd_actual) /NULLIFZERO (py_mtd_actual))*100,2) AS mtd_vs_py
+	, ytd_actual
+	, py_ytd_actual
+	,ROUND( ((ytd_actual - py_ytd_actual) / NULLIFZERO(py_ytd_actual))*100,2) AS ytd_vs_py
+FROM total
+ORDER BY 1;
+
+
+
+
+
+/*Large WL Cases Submitted, percentages*/
+
+WITH vitalDates AS (		
+	SELECT '2023-01-12'::DATE AS targetDate	
+),		
+aggs AS (		
+	SELECT COUNT(CASE WHEN sub.calendar_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END)                       AS mtd_actual	
+		, COUNT(CASE WHEN TIMESTAMPADD('YEAR',1,sub.calendar_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) AS py_mtd_actual
+		, COUNT(CASE WHEN sub.calendar_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END)                        AS ytd_actual
+		, COUNT(CASE WHEN TIMESTAMPADD('YEAR',1,sub.calendar_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) AS py_ytd_actual
+		, COUNT(CASE WHEN prod.product_type_cde = 'Whole Life' AND pr.band_range_display_order_val > 0 AND sub.calendar_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END)                        AS lp_mtd_actual
+		, COUNT(CASE WHEN prod.product_type_cde = 'Whole Life' AND pr.band_range_display_order_val > 0 AND TIMESTAMPADD('YEAR',1,sub.calendar_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) AS lp_py_mtd_actual
+		, COUNT(CASE WHEN prod.product_type_cde = 'Whole Life' AND pr.band_range_display_order_val > 0 AND sub.calendar_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END)                        AS lp_ytd_actual
+		, COUNT(CASE WHEN prod.product_type_cde = 'Whole Life' AND pr.band_range_display_order_val > 0 AND TIMESTAMPADD('YEAR',1,sub.calendar_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) AS lp_py_ytd_actual
+		, COUNT(CASE WHEN prod.product_type_cde = 'Whole Life' AND sub.calendar_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END)                        AS wl_mtd_actual
+		, COUNT(CASE WHEN prod.product_type_cde = 'Whole Life' AND TIMESTAMPADD('YEAR',1,sub.calendar_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) AS wl_py_mtd_actual
+		, COUNT(CASE WHEN prod.product_type_cde = 'Whole Life' AND sub.calendar_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END)                        AS wl_ytd_actual
+		, COUNT(CASE WHEN prod.product_type_cde = 'Whole Life' AND TIMESTAMPADD('YEAR',1,sub.calendar_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) AS wl_py_ytd_actual
+	FROM edw_new_business_vw.fact_life_policy_vw     lpf 	
+	       LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw    sub ON sub.calendar_dt = lpf.application_submit_dt	
+	       LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid
+	       LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON  prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+    	   LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw pr ON lpf.ref_non_standard_premium_band_natural_key_hash_uuid = pr.ref_non_standard_band_range_natural_key_hash_uuid
+	       AND band_range_type_nm = 'Premium Range Band'
+    	   LEFT OUTER JOIN vitalDates                       vd ON 1=1
+	WHERE prod.product_type_cde <> 'ROP'	
+		--AND prod.product_type_cde = 'Whole Life'
+		AND lpf.application_type_nm <> 'Informal'
+        --	and lpf.distributor_channel_cde = 'MMSD'
+         and chan.channel_nm = 'EZ-app'
+)		
+SELECT '% of Total Submits' AS metricName		
+	, ROUND( (lp_mtd_actual / mtd_actual)*100,2)AS mtd_actual	
+	, ROUND( (lp_py_mtd_actual / py_mtd_actual)*100,2) AS py_mtd_actual	
+	, ROUND( ((lp_mtd_actual / mtd_actual) - (lp_py_mtd_actual / py_mtd_actual))*100,2) AS mtd_vs_py	
+	, ROUND( (lp_ytd_actual / ytd_actual)*100,2) AS ytd_actual	
+	, ROUND( (lp_py_ytd_actual / py_ytd_actual)*100,2) AS py_ytd_actual	
+	, ROUND( ((lp_ytd_actual / ytd_actual) - (lp_py_ytd_actual / py_ytd_actual))*100,2) AS ytd_vs_py	
+FROM aggs		
+UNION ALL 		
+SELECT '% of Whole Life' AS metricName		
+	, ROUND( (lp_mtd_actual / wl_mtd_actual)*100,2) AS mtd_actual	
+	, ROUND( (lp_py_mtd_actual / wl_py_mtd_actual)*100,2) AS py_mtd_actual	
+	, ROUND( ((lp_mtd_actual / wl_mtd_actual) - (lp_py_mtd_actual / wl_py_mtd_actual))*100,2) AS mtd_vs_py	
+	, ROUND( (lp_ytd_actual / wl_ytd_actual)*100,2) AS ytd_actual	
+	, ROUND( (lp_py_ytd_actual / wl_py_ytd_actual)*100,2) AS py_ytd_actual	
+	,ROUND(((lp_ytd_actual / wl_ytd_actual) - (lp_py_ytd_actual / wl_py_ytd_actual))*100,2) AS ytd_vs_py	
+FROM aggs		
+ORDER BY 1;	
+
+
+
+/*Large WL Cases Weighted Premium*/
+WITH vitalDates AS (
+	SELECT '2022-02-03'::DATE AS targetDate
+),
+aggs AS (
+	SELECT pr.band_range_val AS premiumRange
+		, SUM(CASE WHEN sub.calendar_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) mtd_actual
+		, SUM(CASE WHEN TIMESTAMPADD('YEAR',1,sub.calendar_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) py_mtd_actual
+		, SUM(CASE WHEN sub.calendar_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) ytd_actual
+		, SUM(CASE WHEN TIMESTAMPADD('YEAR',1,sub.calendar_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) py_ytd_actual
+	FROM edw_new_business_vw.fact_life_policy_vw              lpf 
+           LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw    sub ON sub.calendar_dt = lpf.application_submit_dt	
+	       LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON  prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+    	   LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw pr ON lpf.ref_non_standard_premium_band_natural_key_hash_uuid = pr.ref_non_standard_band_range_natural_key_hash_uuid
+	       AND band_range_type_nm = 'Premium Range Band'
+	       LEFT OUTER JOIN vitalDates                       vd ON 1=1
+	WHERE  prod.product_type_cde <> 'ROP'
+		AND pr.band_range_display_order_val > 0
+		AND lpf.application_type_nm <> 'Informal'
+          AND prod.product_type_cde = 'Whole Life'
+	GROUP BY 1
+),
+total AS (
+	SELECT SUM(mtd_actual)          mtd_actual
+		, SUM(py_mtd_actual)        py_mtd_actual
+		, SUM(ytd_actual)           ytd_actual
+		, SUM(py_ytd_actual)        py_ytd_actual
+	FROM aggs
+)
+SELECT CASE premiumRange
+		WHEN '$50,000-$99,999'   THEN 1
+		WHEN '$100,000-$249,999' THEN 2
+		WHEN '$250,000+'         THEN 3
+	END sortOrder --DON'T LOOK AT THIS, IT'S JUST FOR ORDERING
+	, premiumRange
+	, mtd_actual/1000000
+	, py_mtd_actual/1000000
+	, ROUND( ((mtd_actual - py_mtd_actual) / py_mtd_actual)*100,2) AS mtd_vs_py
+	, ytd_actual/1000000
+	, py_ytd_actual/1000000
+	, ROUND( ((ytd_actual - py_ytd_actual) / py_ytd_actual)*100,2) AS ytd_vs_py
+FROM aggs
+UNION ALL 
+SELECT 5      AS sortOrder
+	, 'Total' AS premiumRange
+	, mtd_actual/1000000
+	, py_mtd_actual/1000000
+	, ROUND( ((mtd_actual - py_mtd_actual) / py_mtd_actual)*100,2) AS mtd_vs_py
+	, ytd_actual/1000000
+	, py_ytd_actual/1000000
+	, ROUND( ((ytd_actual - py_ytd_actual) / py_ytd_actual)*100,2) AS ytd_vs_py
+FROM total
+ORDER BY 1;
+
+
+
+/*Large WL Cases Weighted Premium, percentages*/
+WITH vitalDates AS (
+	SELECT '2023-01-16'::DATE AS targetDate
+),
+aggs AS (
+	SELECT SUM(CASE WHEN sub.calendar_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END)                       AS mtd_actual
+		, SUM(CASE WHEN TIMESTAMPADD('YEAR',1,sub.calendar_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) AS py_mtd_actual
+		, SUM(CASE WHEN sub.calendar_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END)                        AS ytd_actual
+		, SUM(CASE WHEN TIMESTAMPADD('YEAR',1,sub.calendar_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) AS py_ytd_actual
+		, SUM(CASE WHEN prod.product_type_cde = 'Whole Life' AND pr.band_range_display_order_val > 0 AND sub.calendar_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END)                        AS lp_mtd_actual
+		, SUM(CASE WHEN prod.product_type_cde = 'Whole Life' AND pr.band_range_display_order_val > 0 AND TIMESTAMPADD('YEAR',1,sub.calendar_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) AS lp_py_mtd_actual
+		, SUM(CASE WHEN prod.product_type_cde = 'Whole Life' AND pr.band_range_display_order_val > 0 AND sub.calendar_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END)                        AS lp_ytd_actual
+		, SUM(CASE WHEN prod.product_type_cde = 'Whole Life' AND pr.band_range_display_order_val > 0 AND TIMESTAMPADD('YEAR',1,sub.calendar_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) AS lp_py_ytd_actual
+		, SUM(CASE WHEN prod.product_type_cde = 'Whole Life' AND sub.calendar_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END)                        AS wl_mtd_actual
+		, SUM(CASE WHEN prod.product_type_cde = 'Whole Life' AND TIMESTAMPADD('YEAR',1,sub.calendar_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) AS wl_py_mtd_actual
+		, SUM(CASE WHEN prod.product_type_cde = 'Whole Life' AND sub.calendar_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END)                        AS wl_ytd_actual
+		, SUM(CASE WHEN prod.product_type_cde = 'Whole Life' AND TIMESTAMPADD('YEAR',1,sub.calendar_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) AS wl_py_ytd_actual
+	FROM edw_new_business_vw.fact_life_policy_vw              lpf 
+           LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw    sub ON sub.calendar_dt = lpf.application_submit_dt	
+            LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid
+	       LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON  prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+    	   LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw pr ON lpf.ref_non_standard_premium_band_natural_key_hash_uuid = pr.ref_non_standard_band_range_natural_key_hash_uuid
+	       AND band_range_type_nm = 'Premium Range Band'
+	       LEFT OUTER JOIN vitalDates                       vd ON 1=1
+	WHERE prod.product_type_cde <> 'ROP'
+		and lpf.application_type_nm <> 'Informal'
+		and lpf.distributor_channel_cde = 'MMSD'
+)
+SELECT '% of Total Submits' AS metricName
+	, ROUND( (lp_mtd_actual / mtd_actual)*100,2) AS mtd_actual
+	, ROUND( (lp_py_mtd_actual / py_mtd_actual)*100,2) AS py_mtd_actual
+	, ROUND( ((lp_mtd_actual / mtd_actual) - ZEROIFNULL(lp_py_mtd_actual / py_mtd_actual))*100,2) AS mtd_vs_py
+	, ROUND( (lp_ytd_actual / ytd_actual)*100,2) AS ytd_actual
+	, ROUND( (lp_py_ytd_actual / py_ytd_actual)*100,2) AS py_ytd_actual
+	, ROUND( ((lp_ytd_actual / ytd_actual) - ZEROIFNULL(lp_py_ytd_actual / py_ytd_actual))*100,2) AS ytd_vs_py
+FROM aggs
+UNION ALL 
+SELECT '% of Whole Life' AS metricName
+	,ROUND( (lp_mtd_actual / wl_mtd_actual)*100,2) AS mtd_actual
+	, ROUND( (lp_py_mtd_actual / wl_py_mtd_actual)*100,2)AS py_mtd_actual
+	, ROUND( ((lp_mtd_actual / (wl_mtd_actual)) - ZEROIFNULL(lp_py_mtd_actual / wl_py_mtd_actual))*100,2) AS mtd_vs_py
+	, ROUND( (lp_ytd_actual / wl_ytd_actual)*100,2) AS ytd_actual
+	, ROUND( (lp_py_ytd_actual / wl_py_ytd_actual)*100,2) AS py_ytd_actual
+	, ROUND( ((lp_ytd_actual / wl_ytd_actual) -ZEROIFNULL (lp_py_ytd_actual / wl_py_ytd_actual))*100,2) AS ytd_vs_py
+FROM aggs
+ORDER BY 1;
+
+
+
+
+
+/*----Large WL Cases Weighted Premium, average case size*/
+WITH vitalDates AS (
+	SELECT '2022-02-03'::DATE AS targetDate
+),
+aggs AS (
+	SELECT AVG(CASE WHEN sub.calendar_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) mtd_actual
+		, AVG(CASE WHEN TIMESTAMPADD('YEAR',1,sub.calendar_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) py_mtd_actual
+		, AVG(CASE WHEN sub.calendar_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) ytd_actual
+		, AVG(CASE WHEN TIMESTAMPADD('YEAR',1,sub.calendar_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) py_ytd_actual
+	FROM edw_new_business_vw.fact_life_policy_vw              lpf 
+           LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw    sub ON sub.calendar_dt = lpf.application_submit_dt	
+            LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid
+	       LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON  prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+    	   LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw pr ON lpf.ref_non_standard_premium_band_natural_key_hash_uuid = pr.ref_non_standard_band_range_natural_key_hash_uuid
+	       AND band_range_type_nm = 'Premium Range Band'
+	       LEFT OUTER JOIN vitalDates                       vd ON 1=1
+	WHERE prod.product_type_cde = 'Whole Life'
+		AND pr.band_range_display_order_val > 0
+)
+SELECT 'Average Case Size' AS metricName
+	, mtd_actual
+	, py_mtd_actual
+	,ROUND( ((mtd_actual - py_mtd_actual) / py_mtd_actual)*100,2) AS mtd_vs_py
+	, ytd_actual
+	, py_ytd_actual
+	, ROUND( ((ytd_actual - py_ytd_actual) / py_ytd_actual)*100,2) AS ytd_vs_py
+FROM aggs
+ORDER BY 1;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

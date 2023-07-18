@@ -1,0 +1,677 @@
+/*Submitted  count grid*/
+WITH vitalDates AS (
+    SELECT '2022-03-06'::DATE AS targetDate
+),
+aggs AS (
+    SELECT COUNT(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) mtd_actual
+        , COUNT(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) py_mtd_actual
+        , COUNT(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) ytd_actual
+        , COUNT(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) py_ytd_actual
+FROM edw_new_business_vw.fact_life_policy_vw         lpf
+
+--LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw  isd ON isd.calendar_dt = lpf.application_submit_dt
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw 		     prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_party_agency_nb_current_vw   		f on f.dim_party_agency_natural_key_hash_uuid = lpf.soliciting_agency_dim_party_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw wp ON wp.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_weighted_premium_band_natural_key_hash_uuid
+LEFT OUTER JOIN edw_vw.ref_state_current_vw st ON st.ref_state_natural_key_hash_uuid = lpf.ref_contract_state_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw  i ON i.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_insured_age_band_natural_key_hash_uuid
+LEFT OUTER JOIN vitalDates                       vd ON 1=1
+WHERE prod.product_type_cde <> 'ROP'
+and lpf.application_type_nm <> 'Informal'
+      )SELECT mtd_actual
+        , ROUND(((mtd_actual - py_mtd_actual) / NULLIFZERO(py_mtd_actual))*100,2) AS mtd_vs_py
+        , ytd_actual
+        , ROUND(((ytd_actual - py_ytd_actual) / NULLIFZERO(py_ytd_actual))*100,2) AS ytd_vs_py
+        FROM aggs;
+
+
+/*Submitted  premium grid*/
+WITH vitalDates AS (
+    SELECT '2022-03-06'::DATE AS targetDate ),
+aggs AS (
+    SELECT SUM(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) mtd_actual
+        , SUM(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) py_mtd_actual
+        , SUM(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) ytd_actual
+        , SUM(CASE WHEN TIMESTAMPADD('YEAR',1, lpf.application_submit_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) py_ytd_actual
+FROM edw_new_business_vw.fact_life_policy_vw         lpf
+--LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw  isd ON isd.calendar_dt = lpf.application_submit_dt
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw 		     prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_party_agency_nb_current_vw   		f on f.dim_party_agency_natural_key_hash_uuid = lpf.soliciting_agency_dim_party_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw wp ON wp.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_weighted_premium_band_natural_key_hash_uuid
+LEFT OUTER JOIN edw_vw.ref_state_current_vw st ON st.ref_state_natural_key_hash_uuid = lpf.ref_contract_state_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw  i ON i.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_insured_age_band_natural_key_hash_uuid
+LEFT OUTER JOIN vitalDates                       vd ON 1=1
+WHERE prod.product_type_cde <> 'ROP'
+and lpf.application_type_nm <> 'Informal'
+--and lpf.AGCY_AFFLTN_ID not in (250, 256)
+--and lpf.distributor_channel_cde in ('MMFA','MMSD')
+--and chan.channel_nm in ('Coverpath','MMDirect')
+-- and f.agency_id = '003'
+-- and st.state_cde = 'AK
+)
+SELECT ROUND(mtd_actual/1000000,2) as mtd_actual
+    , ROUND(((mtd_actual - py_mtd_actual) / py_mtd_actual)*100,2)  AS mtd_vs_py
+    , ROUND(ytd_actual/1000000,2) as ytd_actual 
+    , ROUND(((ytd_actual - py_ytd_actual) / py_ytd_actual)*100,2)  AS ytd_vs_py
+FROM aggs;    
+
+
+/*Submitted  Count Graph*/
+WITH vitalDates AS (
+    SELECT '2022-03-06'::DATE AS targetDate
+),
+aggs AS (SELECT DATE_PART('YEAR',lpf.application_submit_dt) AS Submitted Year
+        , DATE_PART('MONTH',lpf.application_submit_dt) AS Submitted Month
+        , COUNT(lpf.policy_nr) actual
+        FROM edw_new_business_vw.fact_life_policy_vw         lpf
+--LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw  isd ON isd.calendar_dt = lpf.application_submit_dt 
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw 		     prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_party_agency_nb_current_vw   		f on f.dim_party_agency_natural_key_hash_uuid = lpf.soliciting_agency_dim_party_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw wp ON wp.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_weighted_premium_band_natural_key_hash_uuid
+LEFT OUTER JOIN edw_vw.ref_state_current_vw st ON st.ref_state_natural_key_hash_uuid = lpf.ref_contract_state_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw  i ON i.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_insured_age_band_natural_key_hash_uuid         
+LEFT OUTER JOIN vitalDates                       vd ON 1=1
+                 WHERE prod.product_type_cde <> 'ROP'
+            and lpf.application_type_nm <> 'Informal'
+                 AND  lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR',-2,vd.targetDate)) AND vd.targetDate
+    GROUP BY 1,2)
+SELECT Submitted Year
+    , Submitted Month
+    , actual
+FROM aggs
+ORDER BY 1,2;
+
+
+/*Submitted  premium Graph*/
+WITH vitalDates AS (
+    SELECT '2022-03-06'::DATE AS targetDate
+),
+aggs AS (
+    SELECT DATE_PART('YEAR',lpf.application_submit_dt) AS Submitted Year
+        , DATE_PART('MONTH',lpf.application_submit_dt) AS Submitted Month
+        , SUM(lpf.annualized_premium_amt ) actual
+        FROM edw_new_business_vw.fact_life_policy_vw         lpf
+--LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw  isd ON isd.calendar_dt = lpf.calendar_dt 
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw 		     prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_party_agency_nb_current_vw   		f on f.dim_party_agency_natural_key_hash_uuid = lpf.soliciting_agency_dim_party_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw wp ON wp.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_weighted_premium_band_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw  i ON i.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_insured_age_band_natural_key_hash_uuid         
+LEFT OUTER JOIN edw_vw.ref_state_current_vw st ON st.ref_state_natural_key_hash_uuid = lpf.ref_contract_state_natural_key_hash_uuid
+LEFT OUTER JOIN vitalDates vd ON 1=1
+WHERE prod.product_type_cde <> 'ROP'
+and lpf.application_type_nm <> 'Informal'
+AND  lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR',-2,vd.targetDate)) AND vd.targetDate
+    GROUP BY 1,2
+)
+SELECT Submitted Year
+    , Submitted Month
+    , actual
+FROM aggs;  
+
+
+/*Submitted  Premium,count by Product MTD*/
+WITH vitalDates AS (
+SELECT '2022-03-07'::DATE AS targetDate
+),
+aggs AS (
+SELECT prod.product_type_cde AS product
+, DATE_TRUNC('MONTH', lpf.application_submit_dt) AS submitPeriod
+, COUNT(lpf.policy_nr) AS actualCount
+, SUM(lpf.annualized_premium_amt) AS actualPremium
+FROM edw_new_business_vw.fact_life_policy_vw         lpf
+--LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw  isd ON isd.calendar_dt = lpf.application_submit_dt
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw 		     prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_party_agency_nb_current_vw   		f on f.dim_party_agency_natural_key_hash_uuid = lpf.soliciting_agency_dim_party_natural_key_hash_uuid
+LEFT OUTER JOIN edw_vw.ref_state_current_vw st ON st.ref_state_natural_key_hash_uuid = lpf.ref_contract_state_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw wp ON wp.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_weighted_premium_band_natural_key_hash_uuid 
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw  i ON i.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_insured_age_band_natural_key_hash_uuid        
+LEFT OUTER JOIN vitalDates vd ON 1=1
+WHERE prod.product_type_cde <> 'ROP'
+and lpf.application_type_nm <> 'Informal'
+AND ( lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH', TIMESTAMPADD('YEAR',-2, vd.targetDate)) AND vd.targetDate
+AND DATE_PART('MONTH', lpf.application_submit_dt) = DATE_PART('MONTH', vd.targetDate)
+AND DATE_PART('DAY', lpf.application_submit_dt) <= DATE_PART('DAY', vd.targetDate))
+GROUP BY 1,2
+)
+SELECT product
+, submitPeriod
+, actualCount
+, actualPremium
+FROM aggs
+ORDER BY 1,2;  
+
+
+/*Submitted  Count,premium by Product YTD*/
+WITH vitalDates AS (
+SELECT '2022-03-07'::DATE AS targetDate
+),
+aggs AS (
+SELECT prod.product_type_cde AS product
+, DATE_TRUNC('YEAR', lpf.application_submit_dt) AS Submitted Period
+, COUNT(lpf.policy_nr) AS actualCount
+, SUM(lpf.annualized_premium_amt ) AS actualPremium
+FROM edw_new_business_vw.fact_life_policy_vw         lpf
+--LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw  isd ON isd.calendar_dt = lpf.application_submit_dt
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw 		     prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw  i ON i.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_insured_age_band_natural_key_hash_uuid         
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw wp ON wp.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_weighted_premium_band_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_party_agency_nb_current_vw   		f on f.dim_party_agency_natural_key_hash_uuid = lpf.soliciting_agency_dim_party_natural_key_hash_uuid
+LEFT OUTER JOIN edw_vw.ref_state_current_vw st ON st.ref_state_natural_key_hash_uuid = lpf.ref_contract_state_natural_key_hash_uuid
+LEFT OUTER JOIN vitalDates vd ON 1=1
+WHERE prod.product_type_cde <> 'ROP'
+and lpf.application_type_nm <> 'Informal'
+AND ( lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR',-2, vd.targetDate)) AND vd.targetDate
+AND CASE
+WHEN DATE_PART('YEAR',  lpf.application_submit_dt) % 4 = 0
+AND DATE_PART('DOY',  lpf.application_submit_dt) >= 60
+THEN DATE_PART('DOY', lpf.application_submit_dt) - 1
+ELSE DATE_PART('DOY',  lpf.application_submit_dt)
+END <= DATE_PART('DOY', vd.targetDate))
+GROUP BY 1,2
+)
+SELECT product
+, Submitted Period
+, actualCount
+, actualPremium
+FROM aggs
+ORDER BY 1,2;
+
+/*Submitted  Count,premium by Product Code YTD*/
+WITH vitalDates AS (
+    SELECT '2022-03-07'::DATE AS targetDate
+),
+aggs AS (
+    SELECT  prod.product_nm  AS product 
+        , DATE_TRUNC('YEAR',lpf.application_submit_dt) AS Submitted Period
+        , COUNT(lpf.policy_nr) AS actualCount
+        , SUM(lpf.annualized_premium_amt) AS actualPremium
+   FROM edw_new_business_vw.fact_life_policy_vw         lpf
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw 		     prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw   i ON i.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_insured_age_band_natural_key_hash_uuid         
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw   wp ON wp.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_weighted_premium_band_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_party_agency_nb_current_vw   		 f on f.dim_party_agency_natural_key_hash_uuid = lpf.soliciting_agency_dim_party_natural_key_hash_uuid
+--LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw   isd ON isd.calendar_dt = lpf.application_submit_dt
+LEFT OUTER JOIN edw_vw.ref_state_current_vw st ON st.ref_state_natural_key_hash_uuid = lpf.ref_contract_state_natural_key_hash_uuid
+        LEFT OUTER JOIN vitalDates                       vd ON 1=1
+    WHERE prod.product_type_cde <> 'ROP'
+and lpf.application_type_nm <> 'Informal'
+        AND ( lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR',-2, vd.targetDate)) AND vd.targetDate
+            AND CASE 
+                    WHEN DATE_PART('YEAR', lpf.application_submit_dt) % 4 = 0 
+                        AND DATE_PART('DOY', lpf.application_submit_dt) >= 60 
+                    THEN DATE_PART('DOY',lpf.application_submit_dt) - 1      
+                    ELSE DATE_PART('DOY', lpf.application_submit_dt)          
+                END <= DATE_PART('DOY', vd.targetDate))
+            GROUP BY 1,2
+)
+SELECT product
+    , Submitted Period
+    , actualCount
+    , actualPremium
+FROM aggs
+ORDER BY 1,2;
+
+
+
+
+/*Submitted  Count,premium by Product Code MTD*/
+WITH vitalDates AS (
+    SELECT '2022-03-07'::DATE AS targetDate
+),
+aggs AS (
+    SELECT  prod.product_nm  AS product 
+        , DATE_TRUNC('MONTH', lpf.application_submit_dt) AS Submitted Period 
+        , COUNT(lpf.policy_nr) AS actualCount
+        , SUM(lpf.annualized_premium_amt) AS actualPremium
+FROM edw_new_business_vw.fact_life_policy_vw         lpf
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw 		     prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw   i ON i.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_insured_age_band_natural_key_hash_uuid         
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw   wp ON wp.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_weighted_premium_band_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_party_agency_nb_current_vw   		 f on f.dim_party_agency_natural_key_hash_uuid = lpf.soliciting_agency_dim_party_natural_key_hash_uuid
+LEFT OUTER JOIN edw_vw.ref_state_current_vw st ON st.ref_state_natural_key_hash_uuid = lpf.ref_contract_state_natural_key_hash_uuid
+--LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw   isd ON isd.calendar_dt = lpf.application_submit_dt
+        LEFT OUTER JOIN vitalDates                       vd ON 1=1
+ WHERE prod.product_type_cde <> 'ROP'
+and lpf.application_type_nm <> 'Informal'
+            AND ( lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH', TIMESTAMPADD('YEAR',-2, vd.targetDate)) AND vd.targetDate
+            AND DATE_PART('MONTH', lpf.application_submit_dt) = DATE_PART('MONTH', vd.targetDate) 
+            AND DATE_PART('DAY', lpf.application_submit_dt) <= DATE_PART('DAY', vd.targetDate))   
+       GROUP BY 1,2
+)
+SELECT product
+    , Submitted Period
+    , actualCount
+    , actualPremium
+FROM aggs
+ORDER BY 1,2;
+
+
+
+--amount at risk
+--mtd/ytd/rolling 12 submitted count by amount at risk bands for past 3 years
+WITH vitalDates AS (
+SELECT '2022-12-12'::DATE AS targetDate
+),
+aggs AS (
+SELECT 
+case when ar.band_range_type_nm = 'Amount At Risk Band' then ar.band_range_val  end as  AmountAtRiskBand  --Amount At Risk Band
+--, DATE_TRUNC('YEAR',  lpf.application_submit_dt) AS SubmittedPeriod --for ytd
+--, DATE_TRUNC('MONTH',  lpf.application_submit_dt) AS SubmittedPeriod --for mtd
+, CASE
+WHEN  lpf.application_submit_dt BETWEEN TIMESTAMPADD('YEAR',-1,vd.targetDate)+1 AND vd.targetDate THEN 'Current 12 mo'
+WHEN lpf.application_submit_dt BETWEEN TIMESTAMPADD('YEAR',-2,vd.targetDate)+1 AND TIMESTAMPADD('YEAR',-1,vd.targetDate) THEN 'Prior 12 mo'
+END AS submittedPeriod --for rolling 
+, COUNT(lpf.policy_nr) AS actualCount
+, SUM(lpf.annualized_premium_amt) AS actualPremium
+FROM edw_new_business_vw.fact_life_policy_vw         lpf
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw 		     prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw   i ON i.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_insured_age_band_natural_key_hash_uuid         
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw   ar ON ar.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_risk_band_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw   wp ON wp.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_weighted_premium_band_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_party_agency_nb_current_vw   		 f on f.dim_party_agency_natural_key_hash_uuid = lpf.soliciting_agency_dim_party_natural_key_hash_uuid
+LEFT OUTER JOIN edw_vw.ref_state_current_vw st ON st.ref_state_natural_key_hash_uuid = lpf.ref_contract_state_natural_key_hash_uuid
+--LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw   isd ON isd.calendar_dt =  lpf.application_submit_dt
+LEFT OUTER JOIN vitalDates vd ON 1=1
+WHERE prod.product_type_cde <> 'ROP'
+and lpf.application_type_nm <> 'Informal'
+/*AND ( lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR',-2, vd.targetDate)) AND vd.targetDate --for ytd
+AND CASE
+WHEN DATE_PART('YEAR',  lpf.application_submit_dt) % 4 = 0 --check if it's a leap year
+AND DATE_PART('DOY',lpf.application_submit_dt) >= 60 --check if it's past Feb 29 which is day 60 of the year
+THEN DATE_PART('DOY', lpf.application_submit_dt) - 1 --check against the submit date day of year minus a day
+ELSE DATE_PART('DOY',  lpf.application_submit_dt) --else, just use the day of year
+END <= DATE_PART('DOY', vd.targetDate)) --for ytd; up to same point in year*/
+/*AND ( lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH', TIMESTAMPADD('YEAR',-2, vd.targetDate)) AND vd.targetDate --for mtd
+AND DATE_PART('MONTH',  lpf.application_submit_dt) = DATE_PART('MONTH', vd.targetDate) --for mtd, too; ensure it's the month
+AND DATE_PART('DAY', lpf.application_submit_dt) <= DATE_PART('DAY', vd.targetDate)) --for mtd, too; ensure it's within the same part of the month*/
+AND lpf.application_submit_dt BETWEEN TIMESTAMPADD('YEAR',-2, vd.targetDate)+1 AND vd.targetDate --for rolling 12
+GROUP BY 1,2
+)
+SELECT CASE AmountAtRiskBand
+WHEN '<$50,000' THEN 1
+WHEN '$50,000-$249,999' THEN 2
+WHEN '$250,000-$499,999' THEN 3
+WHEN '$500,000' THEN 4
+WHEN '$500,001-$1,000,000' THEN 5
+WHEN '$1,000,001-$2,000,000' THEN 6
+WHEN '$2,000,001-$3,000,000' THEN 7
+WHEN '$3,000,001-$5,000,000' THEN 8
+WHEN '$5,000,001-$9,999,999' THEN 9
+WHEN '$10,000,000' THEN 10
+WHEN '>$10,000,000' THEN 11
+ELSE 15
+END AS sortOrder
+, AmountAtRiskBand
+, SubmittedPeriod
+, actualCount
+, actualPremium
+FROM aggs
+ORDER BY 3,1;
+
+
+--insured age MTD
+WITH vitalDates AS (
+SELECT '2022-03-16'::DATE AS targetDate
+),
+aggs AS (
+SELECT --ib.InsuredAgeBand
+case when ib.band_range_type_nm = 'Insured Age Band' then ib.band_range_val end as InsuredAgeBand   --Insured Age Band (PII)
+, CASE
+WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH', TIMESTAMPADD('YEAR',0,vd.targetDate)) AND vd.targetDate THEN DATE_PART('YEAR',vd.targetDate)
+WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH', TIMESTAMPADD('YEAR',-1,vd.targetDate)) AND TIMESTAMPADD('YEAR',-1,vd.targetDate) THEN DATE_PART('YEAR',TIMESTAMPADD('YEAR',-1,vd.targetDate)+1)
+WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH', TIMESTAMPADD('YEAR',-2,vd.targetDate)) AND TIMESTAMPADD('YEAR',-2,vd.targetDate) THEN DATE_PART('YEAR',TIMESTAMPADD('YEAR',-2,vd.targetDate)+1)
+END AS IssuePeriod
+, COUNT(lpf.policy_nr) AS actualCount
+, SUM(lpf.annualized_premium_amt) AS actualPremium
+FROM edw_new_business_vw.fact_life_policy_vw         lpf
+--LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw   isd ON isd.calendar_dt = lpf.application_submit_dt 
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw 		     prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw  ib ON ib.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_insured_age_band_natural_key_hash_uuid
+LEFT OUTER JOIN edw_vw.ref_state_current_vw st ON st.ref_state_natural_key_hash_uuid = lpf.ref_contract_state_natural_key_hash_uuid
+LEFT OUTER JOIN vitalDates vd ON 1=1
+WHERE prod.product_type_cde <> 'ROP'
+and lpf.application_type_nm <> 'Informal'
+and
+(
+(lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH', TIMESTAMPADD('YEAR',0,vd.targetDate)) AND vd.targetDate) or
+(lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH', TIMESTAMPADD('YEAR',-1,vd.targetDate)) AND TIMESTAMPADD('YEAR',-1,vd.targetDate)) or
+(lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH', TIMESTAMPADD('YEAR',-2,vd.targetDate)) AND TIMESTAMPADD('YEAR',-2,vd.targetDate))
+)
+GROUP BY 1,2
+)
+SELECT CASE InsuredAgeBand
+WHEN '<4' THEN 1
+WHEN '4-16' THEN 2
+WHEN '17-40' THEN 3
+WHEN '41-50' THEN 4
+WHEN '51-60' THEN 5
+WHEN '61-64' THEN 6
+WHEN '65-70' THEN 7
+WHEN '71-80' THEN 8
+WHEN '>80' THEN 9
+ELSE 10
+END AS sortOrder
+, InsuredAgeBand
+, IssuePeriod
+, actualCount
+, actualPremium
+FROM aggs
+ORDER BY 3,1;
+
+
+
+
+
+
+
+--Insured Age Band Rolling 12 Months
+--mtd/ytd/rolling 12 submitted count by amount at risk bands for past 3 years
+--mtd/ytd/rolling 12 submitted premium by amount at risk bands for past 3 years
+WITH vitalDates AS (
+SELECT '2022-08-15'::DATE AS targetDate
+),
+aggs AS (
+SELECT --ib.InsuredAgeBand
+case when ib.band_range_type_nm = 'Insured Age Band' then ib.band_range_val end as InsuredAgeBand   --Insured Age Band (PII)
+, CASE
+WHEN lpf.application_submit_dt BETWEEN TIMESTAMPADD('YEAR',-1,vd.targetDate)+1 AND vd.targetDate THEN 'Current 12 mo'
+WHEN lpf.application_submit_dt  BETWEEN TIMESTAMPADD('YEAR',-2,vd.targetDate)+1 AND TIMESTAMPADD('YEAR',-1,vd.targetDate) THEN 'Prior 12 mo'
+END AS IssuePeriod --for rolling 12
+, COUNT(lpf.policy_nr) AS actualCount
+, SUM(lpf.annualized_premium_amt) AS actualPremium
+FROM edw_new_business_vw.fact_life_policy_vw         lpf
+--LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw   isd ON isd.calendar_dt = lpf.application_submit_dt 
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw 		     prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN edw_vw.ref_state_current_vw st ON st.ref_state_natural_key_hash_uuid = lpf.ref_contract_state_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw  ib ON ib.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_insured_age_band_natural_key_hash_uuid
+LEFT OUTER JOIN vitalDates vd ON 1=1
+WHERE prod.product_type_cde <> 'ROP'
+and lpf.application_type_nm <> 'Informal'
+AND lpf.application_submit_dt BETWEEN TIMESTAMPADD('YEAR',-2, vd.targetDate)+1 AND vd.targetDate --for rolling 12
+GROUP BY 1,2
+)
+SELECT CASE InsuredAgeBand
+WHEN '<4' THEN 1
+WHEN '4-16' THEN 2
+WHEN '17-40' THEN 3
+WHEN '41-50' THEN 4
+WHEN '51-60' THEN 5
+WHEN '61-64' THEN 6
+WHEN '65-70' THEN 7
+WHEN '71-80' THEN 8
+WHEN '>80' THEN 9
+ELSE 10
+END AS sortOrder
+, InsuredAgeBand
+, IssuePeriod
+, actualCount
+, actualPremium
+FROM aggs
+ORDER BY 3,1;
+
+
+--insured age MTD
+--insured age
+--mtd/ytd/rolling 12 Submitted  count by insured age bands for past 3 years
+--mtd/ytd/rolling 12 Submitted  premium by insured age bands for past 3 years
+WITH vitalDates AS (
+SELECT '2022-03-16'::DATE AS targetDate
+),
+aggs AS (
+SELECT --ib.InsuredAgeBand
+ib.band_range_val as InsuredAgeBand
+, CASE
+WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH', TIMESTAMPADD('YEAR',0,vd.targetDate)) AND vd.targetDate THEN DATE_PART('YEAR',vd.targetDate)
+WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH', TIMESTAMPADD('YEAR',-1,vd.targetDate)) AND TIMESTAMPADD('YEAR',-1,vd.targetDate) THEN DATE_PART('YEAR',TIMESTAMPADD('YEAR',-1,vd.targetDate)+1)
+WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH', TIMESTAMPADD('YEAR',-2,vd.targetDate)) AND TIMESTAMPADD('YEAR',-2,vd.targetDate) THEN DATE_PART('YEAR',TIMESTAMPADD('YEAR',-2,vd.targetDate)+1)
+END AS IssuePeriod
+, COUNT(lpf.policy_nr) AS actualCount
+, SUM(lpf.annualized_premium_amt) AS actualPremium
+FROM edw_new_business_vw.fact_life_policy_vw         lpf
+--LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw   iss ON iss.calendar_dt = lpf.application_submit_dt 
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw              prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+LEFT OUTER JOIN edw_vw.ref_state_current_vw st ON st.ref_state_natural_key_hash_uuid = lpf.ref_contract_state_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw  ib ON ib.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_insured_age_band_natural_key_hash_uuid
+and ib.band_range_type_nm = 'Insured Age Band'
+LEFT OUTER JOIN vitalDates vd ON 1=1
+WHERE prod.product_type_cde <> 'ROP'
+and lpf.application_type_nm <> 'Informal'
+and((lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH', TIMESTAMPADD('YEAR',0,vd.targetDate)) AND vd.targetDate) or
+(lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH', TIMESTAMPADD('YEAR',-1,vd.targetDate)) AND TIMESTAMPADD('YEAR',-1,vd.targetDate)) or
+(lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH', TIMESTAMPADD('YEAR',-2,vd.targetDate)) AND TIMESTAMPADD('YEAR',-2,vd.targetDate))
+)
+GROUP BY 1,2
+)
+SELECT CASE InsuredAgeBand
+WHEN '<4' THEN 1
+WHEN '4-16' THEN 2
+WHEN '17-40' THEN 3
+WHEN '41-50' THEN 4
+WHEN '51-60' THEN 5
+WHEN '61-64' THEN 6
+WHEN '65-70' THEN 7
+WHEN '71-80' THEN 8
+WHEN '>80' THEN 9
+ELSE 10
+END AS sortOrder
+, InsuredAgeBand
+, IssuePeriod
+, actualCount
+, actualPremium
+FROM aggs
+ORDER BY 3,1;
+-------------------------------------------------------------------------------------------------------------------------------------------------
+--Insured age YTD
+WITH vitalDates AS (
+SELECT '2022-03-16'::DATE AS targetDate
+),
+aggs AS (
+SELECT --ib.InsuredAgeBand
+ib.band_range_val as InsuredAgeBand
+, CASE
+WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR',0,vd.targetDate)) AND vd.targetDate THEN DATE_PART('YEAR',vd.targetDate)
+WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR',-1,vd.targetDate)) AND TIMESTAMPADD('YEAR',-1,vd.targetDate) THEN DATE_PART('YEAR',TIMESTAMPADD('YEAR',-1,vd.targetDate)+1)
+WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR',-2,vd.targetDate)) AND TIMESTAMPADD('YEAR',-2,vd.targetDate) THEN DATE_PART('YEAR',TIMESTAMPADD('YEAR',-2,vd.targetDate)+1)
+END AS IssuePeriod
+, COUNT(lpf.policy_nr) AS actualCount
+, SUM(lpf.annualized_premium_amt) AS actualPremium
+FROM edw_new_business_vw.fact_life_policy_vw lpf
+--LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw   iss ON iss.calendar_dt = lpf.application_submit_dt 
+LEFT OUTER JOIN edw_vw.ref_state_current_vw st ON st.ref_state_natural_key_hash_uuid = lpf.ref_contract_state_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw              prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw  ib ON ib.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_insured_age_band_natural_key_hash_uuid
+and ib.band_range_type_nm = 'Insured Age Band'
+LEFT OUTER JOIN vitalDates vd ON 1=1
+WHERE prod.product_type_cde <> 'ROP'
+and lpf.application_type_nm <> 'Informal'
+and((lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR',0,vd.targetDate)) AND vd.targetDate) or
+(lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR',-1,vd.targetDate)) AND TIMESTAMPADD('YEAR',-1,vd.targetDate)) or
+(lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR',-2,vd.targetDate)) AND TIMESTAMPADD('YEAR',-2,vd.targetDate))
+)GROUP BY 1,2
+)
+SELECT CASE InsuredAgeBand
+WHEN '<4' THEN 1
+WHEN '4-16' THEN 2
+WHEN '17-40' THEN 3
+WHEN '41-50' THEN 4
+WHEN '51-60' THEN 5
+WHEN '61-64' THEN 6
+WHEN '65-70' THEN 7
+WHEN '71-80' THEN 8
+WHEN '>80' THEN 9
+ELSE 10
+END AS sortOrder
+, InsuredAgeBand
+, IssuePeriod
+, actualCount
+, actualPremium
+FROM aggs
+ORDER BY 3,1;
+
+
+--firms
+--mtd/ytd/rolling 12 submitted count by premium bucket and firm zip code
+WITH vitalDates AS (
+SELECT '2022-09-24'::DATE AS targetDate
+),
+aggs AS (
+SELECT age.agency_nm AS firm
+, age.agency_id AS firmNumber
+, LEFT(age.zip_cde, 5) AS firmPostalCode
+, SUM(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) AS mtd_actual
+, SUM(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) AS ytd_actual
+, SUM(CASE WHEN lpf.application_submit_dt BETWEEN TIMESTAMPADD('YEAR',-1,vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) AS rolling_12_mo
+FROM edw_new_business_vw.fact_life_policy_vw         lpf
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw 		     prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw  ib ON ib.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_insured_age_band_natural_key_hash_uuid
+ LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw wp ON lpf.ref_non_standard_weighted_premium_band_natural_key_hash_uuid = wp.ref_non_standard_band_range_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_party_agency_nb_current_vw   		 age on age.dim_party_agency_natural_key_hash_uuid = lpf.soliciting_agency_dim_party_natural_key_hash_uuid
+--LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw   isd ON isd.calendar_dt = lpf.application_submit_dt
+LEFT OUTER JOIN edw_vw.ref_state_current_vw st ON st.ref_state_natural_key_hash_uuid = lpf.ref_contract_state_natural_key_hash_uuid
+LEFT JOIN vitalDates vd ON 1=1
+where application_submit_dt between '20220801' and '20220924' --current
+and prod.product_type_cde <> 'ROP'
+AND lpf.application_submit_dt >= TIMESTAMPADD('YEAR', -1, vd.targetDate)
+and lpf.application_type_nm <> 'Informal'
+GROUP BY 1,2,3
+)
+SELECT agg.firm
+, agg.firmNumber
+, agg.firmPostalCode
+, agg.mtd_actual
+, agg.ytd_actual
+, agg.rolling_12_mo
+FROM aggs agg
+WHERE COALESCE(mtd_actual, ytd_actual, rolling_12_mo) IS NOT NULL
+ORDER BY 1;
+
+
+/*-- SVA data grid*/
+WITH vitalDates AS (
+SELECT '2022-12-19'::DATE AS targetDate
+)
+SELECT
+lpf.total_risk_amt --Amount At Risk
+,aar.band_range_val as  AmountAtRiskBand  --Amount At Risk Band
+, lpf.application_type_nm      --Application Type
+, lpf.aps_ind       --APS Indicator
+, st.state_cde --Contract State
+, lpf.application_received_dt    AS DateApplicationReceived
+, lpf.application_signed_dt      AS DateApplicationSigned
+, lpf.application_declined_dt    AS DateDeclined
+, lpf.first_final_action_dt      AS DateFirstFinalAction
+, lpf.application_incomplete_dt  AS DateIncompleted
+, lpf.application_issue_dt       AS DateIssued
+, lpf.last_final_action_dt       AS DateLastFinalAction
+, lpf.application_approval_dt    AS DateOffered
+, lpf.reporting_status_dt        AS DatePolicyStatus
+, lpf.application_report_dt      AS DateReported
+, lpf.application_submit_dt      AS DateSubmitted
+, lpf.application_withdrawal_dt  AS DateWithdrawn
+, lpf.distributor_channel_cde --Distribution Channel
+, lpf.electronic_signed_ind --ESign Indicator
+, lpf.face_amt         --Face Amount
+,fa.band_range_val  AS faceamountband
+, lpf.final_risk_class_nm as FinalRiskClass
+, age.agency_nm AS firmname
+, age.agency_id AS firmNumber
+--,VoltageAccess(dac.zip_cde, 'zipcode') AS agency_postal_cde
+--,age.zip_cde   AS agency_postal_cde
+,lpf.first_final_action_nm as FirstFinalAction
+,lpf.insured_age_nr         --Insured Age (PII)
+,ib.band_range_val  as InsuredAgeBand   --Insured Age Band (PII)
+,cu.gender_cde         AS inusred_gender_nm  --Insured Gender Primary (PII)
+,cu.last_nm            AS insured_last_nm --Insured Last Name Primary (PII)
+, CASE
+WHEN lpf.annualized_premium_amt >= 50000 THEN 'Y'
+ELSE 'N'
+END AS largeCaseInd--Large Case Indicator
+, lpf.last_final_action_nm as LastFinalAction
+, lpf.source_system_nm  as OriginatingSystem
+, chan.channel_nm AS Platform
+, lpf.policy_nr --policy number
+, lpf.reporting_status_nm as PolicyStatus
+, prod.product_type_cde AS Product
+, prod.product_nm AS ProductCode
+, lpf.rider_ltc_ind as RiderLTC
+--, lpf.source_risk_cde as RiskClass
+,lpf.Society1851_ind as society1851Indicator
+,(adv.last_nm || ', ' || adv.first_nm) AS SolicitingAdvisorNae     ---,adv.full_nm AS SolicitingAdvisorName -- (PII)
+,adv.business_partner_id AS SolicitingAdvisorID--(PII)
+,lpf.agent_type as solicitingAdvisorType
+, lpf.tobacco_class_nm --Tobacco ClassC
+---, (uw.last_nm || ', ' || uw.first_nm) AS uw_nm  --Underwriter Full Name (PII)
+,Case when uw.first_nm = '' then (uw.last_nm)  else (uw.last_nm || ', ' || uw.first_nm) end as underwriterfullname
+, uw.mm_id                AS uw_mm_id    --Underwriter ID (PII)
+, ooo.associate_team_nm AS UnderwriterTeam
+, lpf.underwriting_type_nm AS UnderwritingMethod
+, lpf.annualized_premium_amt AS WeightedPremium
+, wp.band_range_val  AS WeightedPremiumBand
+From edw_new_business_vw.fact_life_policy_vw    lpf
+LEFT OUTER JOIN edw_vw.ref_state_current_vw                         st ON lpf.ref_contract_state_natural_key_hash_uuid = st.ref_state_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw    prod ON      lpf.ref_non_standard_product_natural_key_hash_uuid = prod.ref_non_standard_product_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan ON lpf.dim_channel_natural_key_hash_uuid = chan.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw  aar ON aar.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_risk_band_natural_key_hash_uuid and aar.band_range_type_nm = 'Amount At Risk Band'
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw  ib On ib.ref_non_standard_band_range_natural_key_hash_uuid =  lpf.ref_non_standard_insured_age_band_natural_key_hash_uuid and ib.band_range_type_nm = 'Insured Age Band' 
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw  wp On wp.ref_non_standard_band_range_natural_key_hash_uuid = lpf.ref_non_standard_weighted_premium_band_natural_key_hash_uuid and wp.band_range_type_nm ='Weighted Premium Band'
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_band_range_vw fa on fa.ref_non_standard_band_range_natural_key_hash_uuid= lpf.ref_non_standard_face_amt_band_natural_key_hash_uuid and fa.band_range_type_nm ='Amount At Risk Band'
+LEFT OUTER JOIN edw_new_business_vw.dig_ops_customer_nb_current_vw  cu ON lpf.dim_customer_natural_key_hash_uuid = cu.dim_customer_natural_key_hash_uuid
+--LEFT OUTER JOIN edw_semantic_vw.sem_agreement_nb_current_vw      acv on acv.dim_agreement_natural_key_hash_uuid = lpf.dim_agreement_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_underwriter_nb_current_vw       uw ON lpf.dim_party_underwriter_natural_key_hash_uuid = uw.dim_underwriter_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_party_advisor_nb_current_vw        adv on adv.dim_party_advisor_natural_key_hash_uuid = lpf.dim_party_advisor_natural_key_hash_uuid and aw.advisor_active_status_cde = 'Actp'
+LEFT OUTER JOIN edw_semantic_vw.sem_party_agency_nb_current_vw           age on age.dim_party_agency_natural_key_hash_uuid = lpf.soliciting_agency_dim_party_natural_key_hash_uuid
+LEFT OUTER JOIN vitalDates                                          vd ON 1=1
+LEFT OUTER JOIN edw_bi_analytics_vw.dim_teams_out_of_office_history_vw ooo ON ooo.associate_id = uw.mm_id AND ooo.out_of_office_dt = '2022-12-19'
+WHERE lpf.application_type_nm <> 'Informal'
+--AND ooo.out_of_office_dt = '2022-12-15'
+--and lpf.policy_nr in  ('21381108','21381109','21381110','21381111','21381112','22867923','22867933','32721470','15819584')
+AND prod.product_type_cde <> 'ROP'
+AND lpf.application_submit_dt = vd.targetDate
+ORDER BY lpf.policy_nr;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

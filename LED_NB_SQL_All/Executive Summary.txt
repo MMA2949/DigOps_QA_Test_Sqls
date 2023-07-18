@@ -1,0 +1,364 @@
+--/*Exec Summary*/
+
+/*Submitted Count*/
+
+WITH vitalDates AS (
+	SELECT '2022-12-21'::DATE AS targetDate
+),
+plans AS (
+	SELECT SUM(pf.plan_daily_val) plan_daily_val
+		, SUM(pf.plan_year_to_dt_val )   plan_year_to_dt_val 
+	FROM edw_new_business_vw.fact_plan_data_vw pf
+		INNER JOIN edw_bi_analytics_vw.dim_date_vw dt ON dt.calendar_dt = pf.plan_dt
+		INNER JOIN vitalDates                   vd ON 1=1
+	WHERE dt.calendar_dt = vd.targetDate
+		AND metric_nm = 'Submitted Counts'
+),
+aggs AS (
+	SELECT COUNT(CASE WHEN lpf.application_submit_dt = vd.targetDate THEN lpf.policy_nr ELSE NULL END) daily_actual
+		, MAX(pl.plan_daily_val) daily_plan
+		, COUNT(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) ytd_actual
+		, MAX(pl.plan_year_to_dt_val ) ytd_plan
+		, COUNT(CASE WHEN chan.channel_nm IN ('Coverpath','MMDirect','Haven Life','LifeBridge') AND lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) ytd_coverpath_actual
+	FROM edw_new_business_vw.fact_life_policy_vw                lpf
+    	   LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid
+	       LEFT OUTER JOIN vitalDates                       vd ON 1=1
+	       LEFT OUTER JOIN plans                            pl ON 1=1
+	WHERE lpf.product_type_cde <> 'ROP'
+	AND lpf.application_type_nm <> 'Informal'
+)
+SELECT daily_actual
+	, ((daily_actual - daily_plan) / daily_plan) AS daily_vs_plan
+	, ytd_actual
+	, ((ytd_actual - ytd_plan) / ytd_plan) AS ytd_vs_plan
+FROM aggs
+ORDER BY 1;
+
+
+/*Submitted Premium*/
+
+WITH vitalDates AS (
+	SELECT '2022-12-13'::DATE AS targetDate
+),
+plans AS (
+	SELECT pf.product_type_cde
+	, SUM(pf.plan_daily_val) plan_daily_val
+	, SUM(pf.plan_year_to_dt_val)   plan_year_to_dt_val
+	FROM edw_new_business_vw.fact_plan_data_vw pf
+		INNER JOIN edw_bi_analytics_vw.dim_date_vw dt ON dt.calendar_dt = pf.plan_dt
+		INNER JOIN vitalDates                   vd ON 1=1
+	WHERE dt.calendar_dt = vd.targetDate
+		AND metric_nm = 'Submitted Wtd Prem'
+	GROUP BY 1
+),
+aggs AS (
+	SELECT  SUM(CASE WHEN lpf.application_submit_dt = vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) daily_actual
+		, MAX(pl.plan_daily_val) daily_plan
+		, SUM(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) ytd_actual
+		, MAX(pl.plan_year_to_dt_val) ytd_plan
+		--, SUM(CASE WHEN chan.channel_nm IN ('Coverpath','MMDirect','Haven Life','LifeBridge') AND lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) ytd_coverpath_actual
+	FROM edw_new_business_vw.fact_life_policy_vw  lpf 
+	       --LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw    sub ON sub.calendar_dt = lpf.application_submit_dt 
+	       LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid
+	       LEFT OUTER JOIN vitalDates                       vd ON 1=1
+	       LEFT OUTER JOIN plans pl ON lpf.product_type_cde = pl.product_type_cde
+	WHERE lpf.product_type_cde <> 'ROP'
+    AND lpf.application_type_nm <> 'Informal'
+),
+total AS (
+	SELECT SUM(daily_actual)        daily_actual
+		, SUM(daily_plan)           daily_plan
+		, SUM(ytd_actual)           ytd_actual
+		, SUM(ytd_plan)             ytd_plan
+	FROM aggs
+)
+SELECT daily_actual
+	, ((daily_actual - daily_plan) / daily_plan) AS daily_vs_plan
+	, ytd_actual
+	, ((ytd_actual - ytd_plan) / ytd_plan)       AS ytd_vs_plan
+FROM aggs
+ORDER BY 1;
+
+
+
+/* Submitted Count Graph */
+WITH vitalDates AS (
+	SELECT '2022-12-13'::DATE AS targetDate
+),
+aggs AS (
+	SELECT DATE_PART('YEAR',lpf.application_submit_dt) AS submitYear
+		, DATE_PART('MONTH',lpf.application_submit_dt) AS submitMonth
+		, COUNT(lpf.policy_nr) AS actual_count
+		, COUNT(CASE WHEN chan.channel_nm IN ('Coverpath','MMDirect','Haven Life','LifeBridge') THEN lpf.policy_nr ELSE NULL END) AS cp_actual_count
+	FROM edw_new_business_vw.fact_life_policy_vw                lpf 
+	       LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid	
+	       LEFT OUTER JOIN vitalDates                       vd ON 1=1
+	WHERE lpf.product_type_cde <> 'ROP'
+	AND lpf.application_type_nm <> 'Informal'
+		AND lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR',TIMESTAMPADD('YEAR',-1,vd.targetDate)) AND vd.targetDate
+	GROUP BY 1,2
+),
+total AS (
+	SELECT submitYear
+		, SUM(actual_count)    AS ytd_actual_count
+		, SUM(cp_actual_count) AS ytd_cp_actual_count
+	FROM aggs
+	GROUP BY 1
+)
+SELECT a.submitYear
+	, a.submitMonth
+	, a.actual_count AS mtd_actual_count
+	, t.ytd_cp_actual_count
+	, t.ytd_actual_count
+	, (t.ytd_cp_actual_count / t.ytd_actual_count) AS cp_percent
+	, (1 - (t.ytd_cp_actual_count / t.ytd_actual_count)) AS ez_percent
+FROM aggs a
+	INNER JOIN total t ON a.submitYear = t.submitYear
+ORDER BY 1,2;
+
+
+
+/* Submitted Premium Graph */
+WITH vitalDates AS (
+	SELECT '2023-01-02'::DATE AS targetDate
+),
+aggs AS (
+	SELECT DATE_PART('YEAR',lpf.application_submit_dt) AS submitYear
+		, DATE_PART('MONTH',lpf.application_submit_dt) AS submitMonth
+		, SUM(lpf.annualized_premium_amt) AS actual_premium
+		, SUM(CASE WHEN chan.channel_nm IN ('Coverpath','MMDirect','Haven Life','LifeBridge') THEN lpf.annualized_premium_amt ELSE NULL END) AS cp_actual_premium
+	FROM edw_new_business_vw.fact_life_policy_vw         lpf 
+	       --LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw    sub ON sub.calendar_dt = lpf.application_submit_dt	
+	      -- LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON prod.product_type_cde = lpf.product_type_cde	
+    	   LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid	
+	       LEFT OUTER JOIN vitalDates                       vd ON 1=1	
+	WHERE lpf.product_type_cde <> 'ROP'
+	    AND lpf.application_type_nm  <> 'Informal'
+		AND lpf.application_submit_dt >= DATE_TRUNC('YEAR',TIMESTAMPADD('YEAR',-1,vd.targetDate))
+	GROUP BY 1,2
+),
+total AS (
+	SELECT submitYear
+		, SUM(actual_premium) AS ytd_actual_premium
+		, SUM(cp_actual_premium) AS ytd_cp_actual_premium
+	FROM aggs
+	GROUP BY 1
+)
+SELECT a.submitYear
+	, a.submitMonth
+	, a.actual_premium AS mtd_actual_premium
+	, t.ytd_cp_actual_premium
+	, t.ytd_actual_premium
+	, (t.ytd_cp_actual_premium / t.ytd_actual_premium) AS cp_percent
+FROM aggs a
+	INNER JOIN total t ON a.submitYear = t.submitYear
+ORDER BY 1,2;
+
+
+
+/*Cycle time Graph*/
+WITH vitalDates AS (
+SELECT '2023-01-15'::DATE AS targetDate
+)
+SELECT DATE_PART('YEAR',lpf.application_approval_dt) AS issueYear
+, DATE_PART('MONTH',lpf.application_approval_dt) AS issueMonth
+, SUM (received_to_approved_nr)/COUNT(received_to_approved_nr) as cnt
+FROM edw_new_business_vw.fact_life_policy_vw lpf
+LEFT OUTER JOIN vitalDates vd ON 1=1
+WHERE
+--lpf.product_type_cde <> 'ROP'
+ lpf.application_approval_dt between (YEAR(vd.targetDate::DATE)-1|| '-01-01' ) ::Date and vd.targetDate
+AND lpf.application_type_nm <> 'Informal'
+GROUP BY 1,2
+ORDER BY 1,2;
+
+
+
+
+/* Pending Inventory Count Pie */
+WITH vitalDates AS (
+	SELECT '2022-12-21'::DATE AS targetDate
+),
+aggs AS (
+	SELECT pif.inventory_status_nm AS invStatus
+		--, dis.displayOrder 
+,Case when inventory_status_nm ='Submitted, Not Approved' then 1 	
+	when inventory_status_nm ='Approved, Not Issued' then 2 
+	when inventory_status_nm='Issued, Not Reported' then 3 
+	when inventory_status_nm='Reported' then 4 
+	when inventory_status_nm='Not Taken' then 5 
+	when inventory_status_nm='Incomplete/Withdrawn' then 6 
+	when inventory_status_nm='Declined' then 7 
+	when inventory_status_nm='N/A' then 8 end as displayOrder
+	, SUM(CASE WHEN inv.calendar_dt = vd.targetDate THEN policy_cnt ELSE 0 END) AS currentCount
+	, SUM(CASE WHEN inv.calendar_dt = TIMESTAMPADD('YEAR',-1,vd.targetDate) THEN policy_cnt ELSE 0 END) AS priorYearCount
+	FROM edw_new_business_vw.fact_life_pending_inventory_vw         pif 
+INNER JOIN edw_bi_analytics_vw.dim_date_vw  inv on inv.calendar_dt = pif.calendar_dt
+INNER JOIN edw_new_business_vw.fact_life_policy_vw lpf on lpf.application_submit_dt = pif.calendar_dt
+INNER JOIN edw_semantic_vw.sem_channel_nb_current_vw   chan ON chan.dim_channel_natural_key_hash_uuid = pif.dim_channel_natural_key_hash_uuid
+--INNER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw    prod on prod.ref_non_standard_product_natural_key_hash_uuid = pif.ref_non_standard_product_natural_key_hash_uuid
+INNER JOIN vitalDates                              vd ON 1=1
+	WHERE pif.inventory_status_nm in ('Approved, Not Issued','Submitted, Not Approved','Issued, Not Reported')
+--		AND pif.distribution_channel_cde = 'MMSD'
+		and lpf.product_type_cde <> 'ROP'
+	and lpf.application_type_nm <> 'Informal'
+	GROUP BY 1,2
+),
+total AS (
+	SELECT SUM(currentCount)  AS currentCount
+		, SUM(priorYearCount) AS priorYearCount
+	FROM aggs
+)
+SELECT a.displayOrder
+	, a.invStatus
+	, a.currentCount
+	, a.priorYearCount
+	, (a.currentCount / t.currentCount) percentTotal
+FROM aggs a
+	INNER JOIN total t ON 1=1
+UNION ALL
+SELECT 4 AS displayOrder
+	, 'Total' AS invStatus
+	, currentCount
+	, priorYearCount
+	, (currentCount / currentCount) percentTotal
+FROM total
+ORDER BY 1;
+
+
+
+
+/* Pending Inventory Premium Pie*/
+WITH vitalDates AS (
+	SELECT '2022-12-21'::DATE AS targetDate
+),
+aggs AS (
+	SELECT pif.inventory_status_nm AS invStatus
+		--, dis.displayOrder 
+,Case when inventory_status_nm ='Submit' then 1 	
+	when inventory_status_nm ='Approved, Not Issued' then 2 
+	when inventory_status_nm='Issued, Not Reported' then 3 
+	when inventory_status_nm='Reported' then 4 
+	when inventory_status_nm='Not Taken' then 5 
+	when inventory_status_nm='Incomplete/Withdrawn' then 6 
+	when inventory_status_nm='Declined' then 7 
+	when inventory_status_nm='N/A' then 8 end as displayOrder
+		, SUM(CASE WHEN inv.calendar_dt = vd.targetDate THEN weighted_premium_nr ELSE 0 END) AS currentCount
+		, SUM(CASE WHEN inv.calendar_dt = TIMESTAMPADD('YEAR',-1,vd.targetDate) THEN weighted_premium_nr ELSE 0 END) AS priorYearCount
+	FROM edw_new_business_vw.fact_life_pending_inventory_vw         pif 
+INNER JOIN edw_bi_analytics_vw.dim_date_vw  inv on inv.calendar_dt = pif.calendar_dt
+INNER JOIN edw_new_business_vw.fact_life_policy_vw lpf on lpf.application_submit_dt = pif.calendar_dt
+INNER JOIN edw_semantic_vw.sem_channel_nb_current_vw   chan ON chan.dim_channel_natural_key_hash_uuid = pif.dim_channel_natural_key_hash_uuid
+INNER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw    prod on prod.ref_non_standard_product_natural_key_hash_uuid = pif.ref_non_standard_product_natural_key_hash_uuid
+		INNER JOIN vitalDates                              vd ON 1=1
+WHERE  pif.inventory_status_nm in ('Approved, Not Issued','Submitted, Not Approved','Issued, Not Reported')
+	--	AND pif.distribution_channel_cde = 'MMSD'
+	GROUP BY 1,2
+),
+total AS (
+	SELECT SUM(currentCount)  AS currentCount
+		, SUM(priorYearCount) AS priorYearCount
+	FROM aggs
+)
+SELECT a.displayOrder
+	, a.invStatus
+	, a.currentCount
+	, a.priorYearCount
+	, (a.currentCount / t.currentCount) percentTotal
+FROM aggs a
+	INNER JOIN total t ON 1=1
+UNION ALL
+SELECT 4 AS displayOrder
+	, 'Total' AS invStatus
+	, currentCount
+	, priorYearCount
+	, (currentCount / currentCount) percentTotal
+FROM total
+ORDER BY 1;	
+
+
+
+/* Cycle Time Pie*/
+WITH vitalDates AS (
+SELECT '2022-12-21'::DATE AS targetDate
+)
+SELECT DATE_PART('YEAR',lpf.application_approval_dt) AS issueYear
+, DATE_PART('MONTH',lpf.application_approval_dt) AS issueMonth
+, ROUND(SUM (received_to_approved_nr)/COUNT(received_to_approved_nr),2) as cnt
+FROM edw_new_business_vw.fact_life_policy_vw lpf
+LEFT OUTER JOIN vitalDates vd ON 1=1
+WHERE
+--lpf.product_type_cde <> 'ROP'
+ lpf.application_approval_dt between (YEAR(vd.targetDate::DATE)-1|| '-01-01' ) ::Date and vd.targetDate
+AND lpf.application_type_nm <> 'Informal'
+GROUP BY 1,2
+ORDER BY 1,2;
+
+
+
+/*Reported Premium KPI*/
+WITH vitalDates AS (
+	SELECT '2022-12-21'::DATE AS targetDate
+),
+plans AS (
+	SELECT /*pf.product_type_cde
+	,*/SUM(pf.plan_daily_val) plan_daily_val
+	, SUM(pf.plan_month_to_dt_val)   plan_month_to_dt_val
+	, SUM(pf.plan_year_to_dt_val)   plan_year_to_dt_val
+	FROM edw_new_business_vw.fact_plan_data_vw pf
+		INNER JOIN edw_bi_analytics_vw.dim_date_vw dt ON dt.calendar_dt = pf.plan_dt
+        INNER JOIN vitalDates                   vd ON 1=1
+    WHERE dt.calendar_dt = vd.targetDate
+        AND metric_nm = 'Reported Premium'
+        --GROUP BY 1
+),
+aggs AS (
+	SELECT /*rpf.product_type 
+	    ,*/SUM(CASE WHEN rpf.calendar_dt = vd.targetDate THEN rpf.weighted_premium_nr ELSE NULL END) daily_actual
+		, MAX(pl.plan_daily_val) daily_plan
+		, SUM(CASE WHEN rpf.calendar_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN rpf.weighted_premium_nr ELSE NULL END) ytd_actual
+		, MAX(pl.plan_year_to_dt_val) ytd_plan
+	FROM edw_new_business_vw.fact_life_reported_premium_vw           rpf 
+	       --LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw rep ON rpf.calendar_dt = rpf.calendar_dt 
+           LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= rpf.dim_channel_natural_key_hash_uuid
+           --LEFT OUTER JOIN edw_new_business_vw.fact_life_policy_vw lpf on lpf.policy_nr = rpf.policy_nr
+           --LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw   prod ON prod.ref_non_standard_product_natural_key_hash_uuid = rpf.ref_non_standard_product_natural_key_hash_uuid
+           LEFT OUTER JOIN vitalDates                       vd ON 1=1
+           LEFT OUTER JOIN plans                            pl ON 1=1 --rpf.product_type  = pl.product_type_cde 
+           WHERE rpf.product_type <> 'ROP'
+    --AND lpf.application_type_nm <> 'Informal'
+        --AND TRIM(chan.channel_nm) = 'EZ-app'
+        --AND rpf.distribution_channel_cde = 'MMFA'
+          -- AND prod.product_type_cde = 'Term Life'
+          --GROUP BY 1
+),
+total AS (
+	SELECT SUM(daily_actual)        daily_actual
+		, SUM(daily_plan)           daily_plan
+		, SUM(ytd_actual)           ytd_actual
+		, SUM(ytd_plan)             ytd_plan
+	FROM aggs
+)
+SELECT ROUND(daily_actual/1000000,2) as daily_actual
+	, ROUND(((daily_actual - daily_plan) / daily_plan)*100,2) AS daily_vs_plan
+	, ROUND(ytd_actual/1000000,2) as ytd_actual
+	, ROUND(((ytd_actual - ytd_plan) / ytd_plan)*100,2) AS ytd_vs_plan
+FROM aggs;
+
+
+
+
+/*Reported Premium Graph*/						
+WITH vitalDates AS (
+	SELECT '2022-12-21'::DATE AS targetDate
+)
+SELECT DATE_PART('YEAR',rpf.calendar_dt) AS reportYear
+	, DATE_PART('MONTH',rpf.calendar_dt) AS reportMonth
+	, SUM(rpf.weighted_premium_nr) AS actual_premium
+FROM edw_new_business_vw.fact_life_reported_premium_vw           rpf 
+           LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= rpf.dim_channel_natural_key_hash_uuid
+           LEFT OUTER JOIN vitalDates                       vd ON 1=1
+           WHERE rpf.product_type <> 'ROP'
+	AND rpf.calendar_dt >= DATE_TRUNC('YEAR',TIMESTAMPADD('YEAR',-1,vd.targetDate))
+GROUP BY 1,2
+ORDER BY 1;

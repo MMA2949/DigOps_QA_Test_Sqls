@@ -1,0 +1,358 @@
+--Submitted 
+
+
+/*Submitted Application volume*/		
+WITH vitalDates AS (		
+	SELECT '2022-12-13'::DATE AS targetDate	
+),		
+plans AS (		
+	SELECT pf.product_type_cde 	
+		 ,SUM(pf.plan_daily_val) plan_daily_val
+		, SUM(pf.plan_month_to_dt_val )   plan_month_to_dt_val
+		, SUM(pf.plan_year_to_dt_val)   plan_year_to_dt_val
+	FROM edw_new_business_vw.fact_plan_data_vw pf	
+		INNER JOIN edw_bi_analytics_vw.dim_date_vw dt ON dt.calendar_dt = pf.plan_dt
+		INNER JOIN vitalDates                   vd ON 1=1
+	WHERE dt.calendar_dt = vd.targetDate	
+		AND metric_nm = 'Submitted Counts'
+	GROUP BY 1	
+),		
+aggs AS (		
+	SELECT lpf.product_type_cde	
+		 , COUNT(CASE WHEN lpf.application_submit_dt = vd.targetDate THEN lpf.policy_nr ELSE NULL END) daily_actual
+		, MAX(pl.plan_daily_val) daily_plan
+		, COUNT(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) mtd_actual
+		, COUNT(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) py_mtd_actual
+		, MAX(pl.plan_month_to_dt_val) mtd_plan
+		, COUNT(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) ytd_actual
+		, COUNT(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) py_ytd_actual
+		, MAX(pl.plan_year_to_dt_val) ytd_plan
+		, COUNT(CASE WHEN chan.channel_nm in ('Coverpath','Haven Life','LifeBridge','MMDirect') AND lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) ytd_coverpath_actual
+	FROM edw_new_business_vw.fact_life_policy_vw    lpf 	
+	    --LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw    sub ON lpf.application_submit_dt = lpf.application_submit_dt	
+	    --LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON lpf.product_type_cde = lpf.product_type_cde	
+    	LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid	
+	    LEFT OUTER JOIN vitalDates                       vd ON 1=1	
+	    LEFT OUTER JOIN plans                            pl ON lpf.product_type_cde = pl.product_type_cde	
+	WHERE lpf.product_type_cde <> 'ROP'	
+	      AND lpf.application_type_nm <> 'Informal'
+	--and lpf.distributionChannel = 'DTC'	
+	GROUP BY 1	
+),		
+total AS (		
+	SELECT SUM(daily_actual)        daily_actual	
+		, SUM(daily_plan)           daily_plan
+		, SUM(mtd_actual)           mtd_actual
+		, SUM(py_mtd_actual)        py_mtd_actual
+		, SUM(mtd_plan)             mtd_plan
+		, SUM(ytd_actual)           ytd_actual
+		, SUM(py_ytd_actual)        py_ytd_actual
+		, SUM(ytd_plan)             ytd_plan
+		, SUM(ytd_coverpath_actual) ytd_coverpath_actual
+	FROM aggs	
+)		
+SELECT CASE product_type_cde		
+		WHEN 'Whole Life'     THEN 1
+		WHEN 'Term Life'      THEN 2
+		WHEN 'Universal Life' THEN 3
+		WHEN 'Variable Life'  THEN 4
+	END sortOrder --DON'T LOOK AT THIS, IT'S JUST FOR ORDERING	
+	, product_type_cde	
+	, daily_actual	
+	, daily_plan	
+	, mtd_actual	
+	, ((mtd_actual - py_mtd_actual) / py_mtd_actual)*100 AS mtd_vs_py	
+	, ((mtd_actual - mtd_plan) / mtd_plan)           AS mtd_vs_plan	
+	, ytd_actual	
+	, ROUND( ((ytd_actual - py_ytd_actual) / py_ytd_actual)*100,2) AS ytd_vs_py	
+	, ((ytd_actual - ytd_plan) / ytd_plan)           AS ytd_vs_plan	
+    , ROUND((ytd_coverpath_actual / ytd_actual)*100,2)           AS coverpath_ytd		
+FROM aggs		
+UNION ALL 		
+SELECT 5      AS sortOrder		
+	, 'Total' AS product_type_cde	
+	, daily_actual	
+	, daily_plan	
+	, mtd_actual	
+	, ((mtd_actual - py_mtd_actual) / py_mtd_actual)*100 AS mtd_vs_py	
+	, ((mtd_actual - mtd_plan) / mtd_plan)           AS mtd_vs_plan	
+	, ytd_actual	
+	, ROUND( ((ytd_actual - py_ytd_actual) / py_ytd_actual)*100,2) AS ytd_vs_py	
+	, ((ytd_actual - ytd_plan) / ytd_plan)           AS ytd_vs_plan	
+	, ROUND((ytd_coverpath_actual / ytd_actual)*100,2)           AS coverpath_ytd	
+FROM total		
+ORDER BY 1;
+
+
+
+
+
+/*Submitted weighted premium*/
+WITH vitalDates AS (
+SELECT '2022-12-13'::DATE AS targetDate
+),
+plans AS (
+SELECT pf.product_type_cde
+, SUM(pf.plan_daily_val) plan_daily_val
+, SUM(pf.plan_month_to_dt_val) plan_month_to_dt_val
+, SUM(pf.plan_year_to_dt_val) plan_year_to_dt_val
+FROM edw_new_business_vw.fact_plan_data_vw pf
+INNER JOIN edw_bi_analytics_vw.dim_date_vw dt ON dt.calendar_dt  = pf.plan_dt
+INNER JOIN vitalDates vd ON 1=1
+WHERE dt.calendar_dt = vd.targetDate
+AND metric_nm = 'Submitted Wtd Prem'
+GROUP BY 1
+),
+aggs AS (
+SELECT lpf.product_type_cde
+, SUM(CASE WHEN lpf.application_submit_dt = vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) daily_actual
+, MAX(pl.plan_daily_val) daily_plan
+, SUM(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) mtd_actual
+, SUM(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) py_mtd_actual
+, MAX(pl.plan_month_to_dt_val) mtd_plan
+, SUM(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) ytd_actual
+, SUM(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) py_ytd_actual
+, MAX(pl.plan_year_to_dt_val) ytd_plan
+, SUM(CASE WHEN chan.channel_nm in ('Coverpath','Haven Life','LifeBridge','MMDirect') AND lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) ytd_coverpath_actual
+FROM edw_new_business_vw.fact_life_policy_vw lpf
+--LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw sub ON lpf.application_submit_dt  = lpf.application_submit_dt
+--LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON lpf.product_type_cde = lpf.product_type_cde
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN vitalDates vd ON 1=1
+LEFT OUTER JOIN plans pl ON lpf.product_type_cde = pl.product_type_cde
+WHERE lpf.product_type_cde <> 'ROP'
+AND lpf.application_type_nm <> 'Informal'
+GROUP BY 1
+),
+total AS (
+SELECT SUM(daily_actual) daily_actual
+, SUM(daily_plan) daily_plan
+, SUM(mtd_actual) mtd_actual
+, SUM(py_mtd_actual) py_mtd_actual
+, SUM(mtd_plan) mtd_plan
+, SUM(ytd_actual) ytd_actual
+, SUM(py_ytd_actual) py_ytd_actual
+, SUM(ytd_plan) ytd_plan
+, SUM(ytd_coverpath_actual) ytd_coverpath_actual
+FROM aggs
+)
+SELECT CASE product_type_cde
+WHEN 'Whole Life' THEN 1
+WHEN 'Term Life' THEN 2
+WHEN 'Universal Life' THEN 3
+WHEN 'Variable Life' THEN 4
+END sortOrder --DON'T LOOK AT THIS, IT'S JUST FOR ORDERING
+, product_type_cde
+, ROUND(daily_actual/1000000,2) as daily_actual
+, ROUND(daily_plan/1000000,2) as daily_plan
+, ROUND(mtd_actual/1000000,2) as mtd_actual
+, ROUND(((mtd_actual - py_mtd_actual) / py_mtd_actual)*100,2) AS mtd_vs_py
+, ROUND(((mtd_actual - mtd_plan) / mtd_plan)*100,2) AS mtd_vs_plan
+, ROUND(ytd_actual/1000000,2) as ytd_actual
+, ROUND(((ytd_actual - py_ytd_actual) / py_ytd_actual)*100,2) AS ytd_vs_py
+, ROUND(((ytd_actual - ytd_plan) / ytd_plan)*100,2) AS ytd_vs_plan
+, ROUND( (ytd_coverpath_actual / ytd_actual)*100,2) AS coverpath_ytd
+FROM aggs
+UNION ALL
+SELECT 5 AS sortOrder
+, 'Total' AS product_type_cde
+, ROUND(daily_actual/1000000,2) as daily_actual
+, ROUND(daily_plan/1000000,2) as daily_plan
+, ROUND(mtd_actual/1000000,2) as mtd_actual
+, ROUND(((mtd_actual - py_mtd_actual) / py_mtd_actual)*100,2) AS mtd_vs_py
+, ROUND(((mtd_actual - mtd_plan) / mtd_plan)*100,2) AS mtd_vs_plan
+, ROUND(ytd_actual/1000000,2) as ytd_actual
+, ROUND(((ytd_actual - py_ytd_actual) / py_ytd_actual)*100,2) AS ytd_vs_py
+, ROUND(((ytd_actual - ytd_plan) / ytd_plan)*100,2) AS ytd_vs_plan
+, ROUND( (ytd_coverpath_actual / ytd_actual)*100,2) AS coverpath_ytd
+FROM total
+ORDER BY 1;
+
+
+
+
+/*submitted average weighted premium*/		
+WITH vitalDates AS (		
+	SELECT '2022-12-13'::DATE AS targetDate	
+),		
+aggs AS (		
+	SELECT lpf.product_type_cde	
+		, Sum(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) mtd_actual
+		, Sum(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) py_mtd_actual
+		, Sum(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) ytd_actual
+		, Sum(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) py_ytd_actual
+		, Count(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) policies
+		, Count(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) policies2
+		, Count(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) pypolicies1
+		, Count(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) pypolicies2
+	FROM edw_new_business_vw.fact_life_policy_vw                lpf 	
+	       --LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw    sub ON lpf.application_submit_dt = lpf.application_submit_dt 	
+	       --LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON lpf.product_type_cde = lpf.product_type_cde	
+    	   LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid	
+	       LEFT OUTER JOIN vitalDates                       vd ON 1=1	
+	WHERE lpf.product_type_cde <> 'ROP'	
+	AND lpf.application_type_nm <> 'Informal'
+--	and chan.channeltype in ('MMDirect','Haven Life','Lifebridge') 	
+	GROUP BY 1	
+),		
+Total AS (		
+select Sum(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) tmtd_actual		
+		, Sum(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) tpy_mtd_actual
+		, Sum(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) tytd_actual
+		, Sum(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) tpy_ytd_actual
+		, Count(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) tpolicies
+		, Count(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) tpolicies2
+		, Count(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) tpypolicies1
+		, Count(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) tpypolicies2
+	FROM edw_new_business_vw.fact_life_policy_vw                lpf 	
+	       --LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw    sub ON lpf.application_submit_dt = lpf.application_submit_dt 	
+	       --LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON lpf.product_type_cde = lpf.product_type_cde	
+    	   LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid	
+	       LEFT OUTER JOIN vitalDates                       vd ON 1=1	
+	WHERE lpf.product_type_cde <> 'ROP'	
+	      AND lpf.application_type_nm <> 'Informal'
+	)	
+SELECT CASE product_type_cde		
+		WHEN 'Whole Life'     THEN 1
+		WHEN 'Term Life'      THEN 2
+		WHEN 'Universal Life' THEN 3
+		WHEN 'Variable Life'  THEN 4
+	END sortOrder --DON'T LOOK AT THIS, IT'S JUST FOR ORDERING	
+	, product_type_cde	
+	, mtd_actual/policies	
+	, ROUND( ((mtd_actual/policies)-(py_mtd_actual/pypolicies1)) / (py_mtd_actual/pypolicies1)*100,2) AS mtd_vs_py	
+	, ytd_actual/policies2	
+	, ROUND( ((ytd_actual/policies2)-(py_ytd_actual/pypolicies2)) / (py_ytd_actual/pypolicies2)*100,2) AS ytd_vs_py	
+FROM aggs		
+Union all		
+SELECT 5      AS sortOrder		
+	, 'Total' AS product_type_cde	
+	, tmtd_actual/tpolicies	
+	, ROUND( ((tmtd_actual/tpolicies)-(tpy_mtd_actual/tpypolicies1)) / (tpy_mtd_actual/tpypolicies1)*100,2) AS mtd_vs_py	
+	, tytd_actual/tpolicies2	
+	,ROUND( ((tytd_actual/tpolicies2)-(tpy_ytd_actual/tpypolicies2)) / (tpy_ytd_actual/tpypolicies2)*100,2) AS ytd_vs_py	
+FROM Total		
+ORDER BY 1;	
+
+
+
+
+
+/*Submitted average faceamount*/
+WITH vitalDates AS (
+	SELECT '2022-12-13'::DATE AS targetDate
+),
+aggs AS (
+	SELECT lpf.product_type_cde
+		, Sum(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.face_amt  ELSE NULL END) mtd_actual
+		, Sum(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.face_amt  ELSE NULL END) py_mtd_actual
+		, Sum(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.face_amt  ELSE NULL END) ytd_actual
+		, Sum(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.face_amt  ELSE NULL END) py_ytd_actual
+		, Count(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) policies
+		, Count(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) policies2
+		, Count(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) pypolicies1
+		, Count(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) pypolicies2
+	FROM edw_new_business_vw.fact_life_policy_vw                lpf 
+	       --LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw     sub ON lpf.application_submit_dt = lpf.application_submit_dt
+	       --LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON prod.product_type_cde = lpf.product_type_cde
+    	   LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid
+	       LEFT OUTER JOIN vitalDates                       vd ON 1=1
+	WHERE lpf.product_type_cde <> 'ROP'
+	AND lpf.application_type_nm <> 'Informal'
+--	and chan.channeltype in ('MMDirect','Haven Life','Lifebridge') 
+	GROUP BY 1
+),
+Total AS (
+	select Sum(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.face_amt  ELSE NULL END) tmtd_actual
+		, Sum(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.face_amt  ELSE NULL END) tpy_mtd_actual
+		, Sum(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.face_amt  ELSE NULL END) tytd_actual
+		, Sum(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.face_amt  ELSE NULL END) tpy_ytd_actual
+		, Count(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) tpolicies
+		, Count(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) tpolicies2
+		, Count(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) tpypolicies1
+		, Count(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) tpypolicies2
+	FROM edw_new_business_vw.fact_life_policy_vw                lpf 
+	       --LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw     sub ON lpf.application_submit_dt = lpf.application_submit_dt
+	       --LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON prod.product_type_cde = lpf.product_type_cde
+    	   LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid
+	       LEFT OUTER JOIN vitalDates                       vd ON 1=1
+	WHERE lpf.product_type_cde <> 'ROP'
+	AND lpf.application_type_nm <> 'Informal'
+--	and chan.channeltype in ('MMDirect','Haven Life','Lifebridge') 
+--	GROUP BY 1
+)
+SELECT CASE product_type_cde
+		WHEN 'Whole Life'     THEN 1
+		WHEN 'Term Life'      THEN 2
+		WHEN 'Universal Life' THEN 3
+		WHEN 'Variable Life'  THEN 4
+	END sortOrder --DON'T LOOK AT THIS, IT'S JUST FOR ORDERING
+	, product_type_cde
+	, ROUND(mtd_actual/NULLIFZERO(policies)/1000000,2) 
+	, ROUND(((mtd_actual/NULLIFZERO(policies))-(py_mtd_actual/NULLIFZERO(pypolicies1))) / NULLIFZERO((py_mtd_actual/NULLIFZERO(pypolicies1)))*100,2) AS mtd_vs_py
+	, ROUND(ytd_actual/NULLIFZERO(policies2)/1000000,2)
+	, ROUND(((ytd_actual/NULLIFZERO(policies2))-(py_ytd_actual/NULLIFZERO(pypolicies2))) / NULLIFZERO((py_ytd_actual/NULLIFZERO(pypolicies2)))*100,2) AS ytd_vs_py
+FROM aggs
+Union all
+SELECT 5      AS sortOrder
+	, 'Total' AS product_type_cde
+	, ROUND(tmtd_actual/NULLIFZERO(tpolicies)/1000000,2) 
+	, ROUND(((tmtd_actual/NULLIFZERO(tpolicies))-(tpy_mtd_actual/NULLIFZERO(tpypolicies1))) / NULLIFZERO((tpy_mtd_actual/NULLIFZERO(tpypolicies1)))*100,2) AS mtd_vs_py
+	, ROUND(tytd_actual/NULLIFZERO(tpolicies2)/1000000,2) 
+	, ROUND(((tytd_actual/NULLIFZERO(tpolicies2))-(tpy_ytd_actual/NULLIFZERO(tpypolicies2))) / NULLIFZERO((tpy_ytd_actual/NULLIFZERO(tpypolicies2)))*100,2) AS ytd_vs_py
+FROM Total
+ORDER BY 1;	
+
+
+
+
+/*Submitted average insured age*/
+WITH vitalDates AS (
+	SELECT '2022-12-13'::DATE AS targetDate
+),
+aggs AS (
+	SELECT lpf.product_type_cde
+		, SUM(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.insured_age_nr ELSE NULL END)/COUNT(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.insured_age_nr ELSE NULL END) ytd_actual
+		, SUM(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.insured_age_nr ELSE NULL END)/COUNT(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.insured_age_nr ELSE NULL END) py_ytd_actual
+	FROM edw_new_business_vw.fact_life_policy_vw            lpf 
+	    --LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw   sub ON lpf.application_submit_dt = lpf.application_submit_dt 
+	    --LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON prod.product_type_cde = lpf.product_type_cde
+    	LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid
+	    LEFT OUTER JOIN vitalDates                       vd ON 1=1
+	WHERE lpf.product_type_cde <> 'ROP'
+	AND lpf.application_type_nm <> 'Informal'
+	GROUP BY 1
+),
+total AS (
+	SELECT 'Total' AS product_type_cde
+		, AVG(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.insured_age_nr ELSE NULL END) ytd_actual
+		, AVG(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.insured_age_nr ELSE NULL END) py_ytd_actual
+	FROM edw_new_business_vw.fact_life_policy_vw            lpf 
+	    --LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw   sub ON lpf.application_submit_dt = lpf.application_submit_dt 
+	    --LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON prod.product_type_cde = lpf.product_type_cde
+    	LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid
+	    LEFT OUTER JOIN vitalDates                       vd ON 1=1
+	WHERE lpf.product_type_cde <> 'ROP'
+	AND lpf.application_type_nm <> 'Informal'
+)
+SELECT CASE product_type_cde
+		WHEN 'Whole Life'     THEN 1
+		WHEN 'Term Life'      THEN 2
+		WHEN 'Universal Life' THEN 3
+		WHEN 'Variable Life'  THEN 4
+	END sortOrder --DON'T LOOK AT THIS, IT'S JUST FOR ORDERING
+	, product_type_cde
+	,ROUND( ytd_actual,2)
+	, ROUND( py_ytd_actual,2)
+FROM aggs
+UNION ALL
+SELECT 5 AS sortOrder
+	, product_type_cde
+	, ROUND( ytd_actual,2)
+	, ROUND( py_ytd_actual,2)
+FROM total
+ORDER BY 1;
+
+
+
+

@@ -1,0 +1,947 @@
+/*Unassigned policies KPI's*/
+select t.Calendar_Dt,t.Submitted_Cases,t.UNasg as Unassigned_Cases, t.unavg as Unassigned_Cases_with_Labs,  (unavg/UNasg*100) as Percent_Unassigned_Cases_With_Labs,t.Unassigned_Cases_Past_SLA from
+(select tgt.Calendar_Dt as Calendar_Dt,
+sum ( Submitted_Cases) Submitted_Cases,sum(Unassigned_Cases) UNasg,sum(Unassigned_Cases_with_Labs) as unavg,sum(Unassigned_Cases_Past_SLA)as Unassigned_Cases_Past_SLA
+from 
+(select 
+lp.calendar_dt as Calendar_Dt,
+p.channel_nm as Platform,
+sp.product_type_cde as Product_Type,
+lp.uw_method_nm,
+count(Case When lp.submit_dt= '2022-09-23' then lp.policy_nr else null end) as Submitted_Cases,
+count(Case When lp.mm_id is null and lp.current_status_nm='Pending' and lp.in_queue_dt is not null then lp.policy_nr else null end) as Unassigned_Cases,
+count(Case when lp.mm_id is null and lp.current_status_nm='Pending' and lp.in_queue_dt is not null and lp.lab_start_dt is not null then lp.policy_nr else null end) as Unassigned_Cases_with_Labs,
+case when count(Case When lp.mm_id is null and lp.current_status_nm='Pending' and lp.in_queue_dt is not null then 1 Else Null End)>0 then ((count(Case When lp.mm_id is null and lp.current_status_nm='Pending' and lp.in_queue_dt is not null and lp.lab_start_dt is not Null then 1 Else Null End) *100)/count(Case When lp.mm_id is null and lp.current_status_nm='Pending' and lp.in_queue_dt is not null then 1 Else Null End)) Else 0 End as Percent_Unassigned_Cases_With_Labs,
+count(Case When lp.mm_id is null and lp.current_status_nm='Pending' and lp.in_queue_dt is not null and lp.met_assignment_sla_desc in ('Assignment passed due','Did not meet Assignment SLA') then 1 Else Null End) as Unassigned_Cases_Past_SLA
+from edw_new_business_vw.fact_life_policy_underwriting_vw  lp
+left join edw_semantic_vw.sem_channel_nb_history_vw  p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+left join edw_ref_non_standard_vw.ref_non_standard_product_history_vw sp On lp.non_standard_ref_product_natural_key_hash_uuid = sp.ref_non_standard_product_natural_key_hash_uuid 
+where lp.calendar_dt='2022-09-22' 
+--AND p.channel_nm = 'MMDirect'
+And sp.product_type_cde = 'Term Life'
+group by lp.calendar_dt,
+		Platform,
+		Product_Type,
+		lp.uw_method_nm
+Order by lp.calendar_dt,
+		Platform,
+		Product_Type,
+		lp.uw_method_nm ) as tgt group by tgt.Calendar_Dt) as t;
+
+
+
+
+
+
+/*Daily unassigned policies*/
+--Unassigned Cases
+Select lp.calendar_dt,
+		lp.policy_nr,
+		p.channel_nm as Platform, 
+		sp.product_type_cde as Product_Type, 
+		lp.health_class_desc,
+		lp.face_amt,
+		lp.insured_age_nr,
+		lp.gender_cde,
+		lp.uw_method_nm,
+		lp.lite_touch_path_nm as Policy_Recommendation, 
+		case when lp.lab_start_dt is not null then 'Yes' else 'No' End as With_Labs,
+		lp.labs_uploaded_method_nm, 
+		lp.days_in_queue_nr as Days_Unassigned
+from edw_new_business_vw.fact_life_policy_underwriting_vw  lp
+left join edw_semantic_vw.sem_channel_nb_history_vw  p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+left join edw_ref_non_standard_vw.ref_non_standard_product_history_vw sp On lp.non_standard_ref_product_natural_key_hash_uuid = sp.ref_non_standard_product_natural_key_hash_uuid 
+where lp.calendar_dt=(Select TargetDate from Date1)
+and lp.current_status_nm='Pending'
+and lp.mm_id is null
+and lp.in_queue_dt is not null
+order by Days_Unassigned desc, lp.face_amt desc, lp.policy_nr
+
+
+
+
+
+
+/*Ussigned cases with labs*/
+
+select t.cal_dt as calender_dt,t.With_Labs, sum(t.Unassigned_Cases) as Unassigned_Cases from 
+(select 
+lp.calendar_dt as cal_dt,
+case when lp.lab_start_dt is not Null then 'Yes' Else 'No' End as With_Labs,
+p.channel_nm as Platform,
+sp.product_type_cde as Product_Type,
+count(Case When lp.mm_id is null and lp.in_queue_dt is not null then lp.policy_nr else null end) as Unassigned_Cases,
+count(Case when lp.mm_id is null and lp.in_queue_dt is not null and lp.lab_start_dt is not null then lp.policy_nr else null end) as Unassigned_Cases_with_Labs,
+count(Case When lp.mm_id is not null then 1 Else Null End) as Assigned_Cases,
+count(Case When lp.mm_id is not null and lp.lab_start_dt is not Null then 1 Else Null End) as Assigned_Cases_With_Labs
+from edw_new_business_vw.fact_life_policy_underwriting_vw  lp
+left join edw_semantic_vw.sem_channel_nb_history_vw  p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+left join edw_ref_non_standard_vw.ref_non_standard_product_history_vw sp On lp.non_standard_ref_product_natural_key_hash_uuid = sp.ref_non_standard_product_natural_key_hash_uuid 
+where lp.calendar_dt= '2022-09-22'
+AND p.channel_nm = 'MMDirect'
+--And  sp.product_type_cde = 'Whole Life'
+--AND lp.uw_method_nm = 'Manual'
+and lp.current_status_nm='Pending'
+group by
+		lp.calendar_dt,
+		With_Labs,
+		Platform,
+		Product_Type
+Order by
+		lp.calendar_dt,
+		With_Labs,
+		Platform,
+		Product_Type) as t group by t.With_Labs, t.cal_dt
+
+
+
+--------------
+
+select t.cal_dt as calender_dt,t.labs_uploaded_method_nm, sum(t.Unassigned_Cases_with_Labs) as Unassigned_Cases_with_Labs from
+(select 
+lp.calendar_dt as cal_dt,
+p.channel_nm as Platform,
+sp.product_type_cde as Product_Type,
+lp.labs_uploaded_method_nm,
+count(Case when lp.mm_id is null and lp.in_queue_dt is not null then lp.policy_nr else null end) as Unassigned_Cases_with_Labs,
+count(Case When lp.mm_id is not null then 1 Else Null End) as Assigned_Cases_With_Labs
+from edw_new_business_vw.fact_life_policy_underwriting_vw  lp
+left join edw_semantic_vw.sem_channel_nb_history_vw  p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+left join edw_ref_non_standard_vw.ref_non_standard_product_history_vw sp On lp.non_standard_ref_product_natural_key_hash_uuid = sp.ref_non_standard_product_natural_key_hash_uuid 
+where lp.calendar_dt='2022-09-22'
+and lp.current_status_nm='Pending' 
+AND p.channel_nm = 'Haven'
+--And sp.product_type_cde = 'Whole Life'
+--AND lp.uw_method_nm = 'Manual'
+and lp.lab_start_dt is not null 
+group by
+		lp.calendar_dt,
+		Platform,
+		Product_Type,
+		lp.labs_uploaded_method_nm
+Order by lp.calendar_dt,
+		Platform,
+		Product_Type,
+		lp.labs_uploaded_method_nm) as t group by t.labs_uploaded_method_nm,t.cal_dt;
+
+
+----------------------------------
+select lp.calendar_dt,
+case when count(Case When lp.mm_id  is null and lp.in_queue_dt is not null then 1 Else Null End)>0 then ((count(Case When lp.mm_id  is null and lp.in_queue_dt is not null and Lab_Start_Dt is not Null then 1 Else Null End) *100)/count(Case When lp.mm_id  is null and lp.in_queue_dt is not null then 1 Else Null End)) Else 0 End as Percent_Unassigned_Cases_With_Labs
+from edw_new_business_vw.fact_life_policy_underwriting_vw  lp
+left join edw_ref_non_standard_vw.ref_non_standard_product_history_vw sp On lp.non_standard_ref_product_natural_key_hash_uuid = sp.ref_non_standard_product_natural_key_hash_uuid 
+left join edw_semantic_vw.sem_channel_nb_history_vw  p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+where lp.calendar_dt BETWEEN '2022-12-21' and '2022-12-28'
+AND p.channel_nm = 'Coverpath'
+And sp.product_type_cde = 'Whole Life'
+  and lp.current_status_nm = 'Pending'
+group by lp.calendar_dt order by 1
+ 
+
+
+/*Assgined policies KPI"S*/
+
+select count(Case When lp.decision_dt= '2022-12-28' then 1 Else Null End) as Final_Decisions_Made
+from edw_new_business_vw.fact_life_policy_underwriting_vw  lp
+left join edw_ref_non_standard_vw.ref_non_standard_product_history_vw sp On lp.non_standard_ref_product_natural_key_hash_uuid = sp.ref_non_standard_product_natural_key_hash_uuid 
+left join edw_semantic_vw.sem_channel_nb_history_vw  p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+where lp.calendar_dt= '2022-12-28'
+AND p.channel_nm = 'Coverpath'
+And sp.product_type_cde = 'Whole Life'
+
+-----------------------------------------------------------------------------	
+select count(Case When lp.mm_id is not null and lp.current_status_nm='Pending' then 1 Else Null End) as Assigned_Cases
+		from edw_new_business_vw.fact_life_policy_underwriting_vw  lp
+		left join edw_ref_non_standard_vw.ref_non_standard_product_history_vw sp On lp.non_standard_ref_product_natural_key_hash_uuid = sp.ref_non_standard_product_natural_key_hash_uuid 
+left join edw_semantic_vw.sem_channel_nb_history_vw  p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+			where lp.calendar_dt = '2022-12-28'
+			AND p.channel_nm = 'Coverpath'
+And sp.product_type_cde = 'Whole Life'
+
+----------------------------------------------------------------------------------		
+select * from edw_new_business_vw.fact_life_policy_underwriting_vw limit 5;
+
+			select count(Case When lp.mm_id is not null and lp.current_status_nm='Pending' and lp.met_decision_sla_desc in ('Did not meet Decision SLA', 'Decision passed due') then 1 Else Null End) as Assigned_Cases_Past_SLA
+			from edw_new_business_vw.fact_life_policy_underwriting_vw lp 
+			left join edw_ref_non_standard_vw.ref_non_standard_product_history_vw sp On lp.non_standard_ref_product_natural_key_hash_uuid = sp.ref_non_standard_product_natural_key_hash_uuid 
+left join edw_semantic_vw.sem_channel_nb_history_vw  p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+			where lp.calendar_dt = '2022-12-28' 
+			AND p.channel_nm = 'Coverpath'
+And sp.product_type_cde = 'Whole Life'
+			
+-------------------------------------------------------------	 
+		select case when count(Case When lp.mm_id is not null and lp.current_status_nm='Pending' then 1 Else Null End)>0 
+			then ((count(Case When lp.mm_id is not null and lp.current_status_nm='Pending' and lp.lab_start_dt is not Null then 1 Else Null End) *100)/count(Case When lp.mm_id is not null and lp.current_status_nm='Pending' then 1 Else Null End))
+			Else 0 End as Percent_Assigned_Cases_With_Labs
+			from edw_new_business_vw.fact_life_policy_underwriting_vw lp 
+			left join edw_ref_non_standard_vw.ref_non_standard_product_history_vw sp On lp.non_standard_ref_product_natural_key_hash_uuid = sp.ref_non_standard_product_natural_key_hash_uuid 
+left join edw_semantic_vw.sem_channel_nb_history_vw  p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+			where lp.calendar_dt= '2022-12-28'
+			AND p.channel_nm = 'Coverpath'
+And sp.product_type_cde = 'Whole Life'
+			
+			
+	------------------------------------------		
+	 select
+    count(Case When lp.mm_id is not null and lp.assigned_dt='2022-12-28' then 1 Else Null End) as Policies_Assigned_Yesterday
+    from edw_new_business_vw.fact_life_policy_underwriting_vw lp
+left join edw_semantic_vw.sem_channel_nb_history_vw  p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+left join edw_semantic_vw.sem_underwriter_nb_history_vw u on u.dim_underwriter_natural_key_hash_uuid = lp.dim_underwriter_natural_key_hash_uuid
+left join edw_ref_non_standard_vw.ref_non_standard_product_history_vw sp On lp.non_standard_ref_product_natural_key_hash_uuid = sp.ref_non_standard_product_natural_key_hash_uuid 
+where lp.calendar_dt='2022-12-28'	
+AND p.channel_nm = 'Coverpath'
+And sp.product_type_cde = 'Whole Life'
+	
+--------------------------------------------
+
+select lp.calendar_dt,
+--case when count(Case When lp.mm_id is null and lp.in_queue_dt is not null then 1 Else Null End)>0 then ((count(Case When lp.mm_id is null and lp.in_queue_dt is not null and Lab_Start_Dt is not Null then 1 Else Null End) *100)/count(Case When lp.mm_id is null and lp.in_queue_dt is not null then 1 Else Null End)) Else 0 End as Percent_Unassigned_Cases_With_Labs
+case when count(Case When lp.mm_id is not null then 1 Else Null End)>0 then ((count(Case When lp.mm_id is not null and Lab_Start_Dt is not Null then 1 Else Null End) *100)/count(Case When lp.mm_id is not null then 1 Else Null End)) Else 0 End as Percent_Assigned_Cases_With_Labs
+from edw_new_business_vw.fact_life_policy_underwriting_vw lp
+left join edw_semantic_vw.sem_channel_nb_history_vw  p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+left join edw_ref_non_standard_vw.ref_non_standard_product_history_vw sp On lp.non_standard_ref_product_natural_key_hash_uuid = sp.ref_non_standard_product_natural_key_hash_uuid 
+where lp.calendar_dt BETWEEN '2022-12-21' and '2022-12-28'
+  and lp.current_status_nm = 'Pending'
+  AND p.channel_nm = 'Coverpath'
+And sp.product_type_cde = 'Whole Life'
+group by lp.calendar_dt order by 1
+
+
+
+
+
+/*underwriter daily policiy summary */
+With TDate AS
+ ( SELECT '2022-10-04'::DATE AS targetDate)
+ select lp.calendar_dt, 
+		oo.associate_id,
+		--Concat(CONCAT(voltageaccess(u.last_nm,'name',', '),voltageacces(u.first_nm,'name') as Underwriter_Full_Nm,
+		Concat(CONCAT(voltageaccess(u.last_nm,'name'),', '),voltageaccess(u.first_nm,'name')) as Underwriter_Full_Nm,
+		count(Case When lp.mm_id is not null and lp.current_status_nm='Pending' then 1 Else Null End) as Assigned_Cases,
+		case when count(Case When lp.mm_id is not null and lp.current_status_nm='Pending' then 1 Else Null End)>0 then ((count(Case When lp.mm_id is not null and lp.current_status_nm='Pending' and lp.lab_start_dt is not Null then 1 Else Null End) *100)/count(Case When lp.mm_id is not null and lp.current_status_nm='Pending' then 1 Else Null End)) Else 0 End as Percent_Assigned_Cases_With_Labs,
+		count(Case When lp.mm_id is not null and lp.current_status_nm='Pending' and lp.met_decision_sla_desc in ('Did not meet Decision SLA', 'Decision passed due') then 1 Else Null End) as Assigned_Cases_Past_SLA,
+		count(Case When lp.decision_dt=TargetDate then 1 Else Null End) as Final_Decisions_Made,
+		Count(Case When lp.decision_dt=TargetDate and lp.aps_request_cnt>0 then 1 Else Null End) as Decisions_Needing_APS,
+		Count(Case When lp.decision_dt=TargetDate and lp.followup_cnt>0 then 1 Else Null End) as Decisions_Needing_Followup,
+		AVG(Case When lp.decision_dt=TargetDate then lp.decision_time_nr Else Null End) as Mean_Decision_Time
+	--	case when count(Case When lp.decision_dt=(CURRENT_DATE()-1) then 1 Else Null End)>0 then ((Count(Case When lp.decision_dt=(CURRENT_DATE()-1) and lp.aps_request_cnt>0 then 1 Else Null End) *100)/count(Case When lp.decision_dt=(CURRENT_DATE()-1) then 1 Else Null End)) Else 0 End as Percent_Decisions_Needing_APS
+from edw_new_business_vw.fact_life_policy_underwriting_vw lp
+Join TDate on 1=1
+left join edw_semantic_vw.sem_channel_nb_history_vw   p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+left join edw_semantic_vw.sem_underwriter_nb_history_vw  u on u.dim_underwriter_natural_key_hash_uuid = lp.dim_underwriter_natural_key_hash_uuid
+left join edw_bi_analytics_vw.dim_teams_out_of_office_history_vw oo on oo.associate_id = lp.mm_id and oo.out_of_office_dt=lp.calendar_dt
+where lp.calendar_dt= '2022-10-04'
+group by lp.calendar_dt,
+		oo.associate_id,
+		Underwriter_Full_Nm
+Having Assigned_Cases >0 
+	or Percent_Assigned_Cases_With_Labs>0 
+	or Assigned_Cases_Past_SLA>0 
+	or Final_Decisions_Made>0 
+	or Decisions_Needing_APS>0 
+	or Decisions_Needing_Followup>0
+	or Mean_Decision_Time>0 
+Order by lp.calendar_dt,
+		Underwriter_Full_Nm
+
+
+/*underwriter daily policiy summary 5 col.*/
+With TDate AS
+( SELECT '2022-12-08'::DATE AS targetDate)
+select lp.calendar_dt,
+		u.mm_id,
+		Concat(CONCAT(u.last_nm,', '),u.first_nm) as Underwriter_Full_Nm,
+		sum(lp.activity_cnt) as Activity_Count,
+		sum(lp.case_pulled_cnt) as Pulled_Count,
+		sum(lp.case_pushed_cnt) as Pushed_Count,
+		sum(lp.aps_request_cnt) as APS_Ordered_Ct,
+		sum(lp.aps_opened_cnt) as APS_Opened_Ct
+from edw_new_business_vw.fact_underwriter_daily_activity_summary_vw   lp
+Join TDate on 1=1
+left join edw_semantic_vw.sem_channel_nb_history_vw  p on p.dim_channel_natural_key_hash_uuid = lp.dim_channel_natural_key_hash_uuid
+left join edw_semantic_vw.sem_underwriter_nb_history_vw  u on u.dim_underwriter_natural_key_hash_uuid=lp.dim_underwriter_natural_key_hash_uuid
+where lp.calendar_dt='2022-12-08'
+and  u.mm_id is not null
+group by lp.calendar_dt,
+u.mm_id,		
+Underwriter_Full_Nm
+Having Activity_Count >0
+	or Pulled_Count>0
+	or Pushed_Count>0
+	or APS_Ordered_Ct>0
+	or APS_Opened_Ct>0
+Order by lp.calendar_dt,
+		Underwriter_Full_Nm;
+
+
+
+
+--Underwriter Assigned Cases Page
+--Underwriter Assigned Cases
+Select 	lp.calendar_dt,
+		lp.policy_nr,
+		lp.mm_id, 
+		Concat(CONCAT(u.last_nm,', '),u.first_nm) as Underwriter_Full_Name,
+		p.channel_nm as Platform, 
+		sp.product_type_cde as Product_Type, 
+		lp.health_class_desc,
+		lp.face_amt,
+		lp.gender_cde,
+		lp.insured_age_nr,
+		lp.uw_method_nm as Underwriting_Method,
+	--	lp.lite_touch_path_nm as Case_Recommendation, 
+		case when lp.lab_start_dt is not null then 'Yes' else 'No' End as With_Labs,
+		lp.labs_uploaded_method_nm, 
+		case when lp.case_pushed_ind='1' then 'Yes' else 'No' End as Pushed_ind,
+		case when lp.case_pulled_ind='1' then 'Yes' else 'No' End as Pulled_ind,
+		lp.aps_request_cnt as APS_Ordered_ct,
+		lp.aps_opened_cnt as APS_Opened_ct,
+		lp.followup_cnt as Followup_ct,
+		lp.decision_time_nr as Days_Assigned
+from edw_new_business_vw.fact_life_policy_underwriting_vw lp
+left join edw_ref_non_standard_vw.ref_non_standard_product_history_vw sp On lp.non_standard_ref_product_natural_key_hash_uuid = sp.ref_non_standard_product_natural_key_hash_uuid 
+left join edw_semantic_vw.sem_channel_nb_history_vw   p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+left join edw_semantic_vw.sem_underwriter_nb_history_vw    u on   u.dim_underwriter_natural_key_hash_uuid = lp.dim_underwriter_natural_key_hash_uuid
+where lp.calendar_dt=(Select TargetDate from Date1)
+and lp.current_status_nm='Pending'
+and lp.mm_id is not null
+order by lp.calendar_dt, Days_Assigned desc, lp.face_amt desc, lp.policy_nr
+
+
+
+
+/*ussigned policies with labs*/
+
+
+select t.cal_dt as calender_dt,t.With_Labs, sum(t.Assigned_Cases_With_Labs) as Assigned_Cases_With_Labs ,  sum(t.Assigned_Cases_With_Labs_no) from 
+(select 
+lp.calendar_dt as cal_dt,
+case when lp.lab_start_dt is not Null then 'Yes' Else 'No' End as With_Labs,
+p.channel_nm as Platform,
+sp.product_type_cde as Product_Type,
+count(Case When lp.mm_id is null and lp.in_queue_dt is not null then lp.policy_nr else null end) as Unassigned_Cases,
+count(Case when lp.mm_id is null and lp.in_queue_dt is not null and lp.lab_start_dt is not null then lp.policy_nr else null end) as Unassigned_Cases_with_Labs,
+count(Case When lp.mm_id is not null then 1 Else Null End) as Assigned_Cases,
+count(Case When lp.mm_id is not null and lp.lab_start_dt is Null then 1 Else Null End) as Assigned_Cases_With_Labs,
+count(Case When lp.mm_id is not null and lp.lab_start_dt is not Null then 1 Else Null End) as Assigned_Cases_With_Labs_no
+from edw_new_business_vw.fact_life_policy_underwriting_vw    lp
+left join edw_semantic_vw.sem_channel_nb_history_vw    p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+left join edw_ref_non_standard_vw.ref_non_standard_product_history_vw sp On lp.non_standard_ref_product_natural_key_hash_uuid = sp.ref_non_standard_product_natural_key_hash_uuid 
+where lp.calendar_dt= '2022-09-22'
+--AND p.channel_nm = 'MMDirect'
+--And sp.product_type_cde = 'Whole Life'
+--AND lp.uw_method_nm = 'Manual'
+and lp.current_status_nm='Pending'
+group by
+		lp.calendar_dt,
+		With_Labs,
+		Platform,
+		Product_Type
+Order by
+		lp.calendar_dt,
+		With_Labs,
+		Platform,
+		Product_Type) as t group by t.With_Labs, t.cal_dt
+----------------------------------------------------------------------------
+
+
+
+select t.cal_dt as calender_dt,t.labs_uploaded_method_nm, sum(t.Assigned_Cases_With_Labs) as Assigned_Cases_With_Labs from
+(select 
+lp.calendar_dt as cal_dt,
+p.channel_nm as Platform,
+sp.product_type_cde as Product_Type,
+lp.labs_uploaded_method_nm,
+count(Case when lp.mm_id is null and lp.in_queue_dt is not null then lp.policy_nr else null end) as Unassigned_Cases_with_Labs,
+count(Case When lp.mm_id is not null then 1 Else Null End) as Assigned_Cases_With_Labs
+from edw_new_business_vw.fact_life_policy_underwriting_vw    lp
+left join edw_semantic_vw.sem_channel_nb_history_vw    p  on   p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+where lp.calendar_dt='2022-09-22'
+and lp.current_status_nm='Pending' 
+--AND p.channel_nm = 'Haven'
+--And sp.product_type_cde = 'Whole Life'
+--AND lp.uw_method_nm = 'Manual'
+and lp.lab_start_dt is not null 
+group by
+		lp.calendar_dt,
+		Platform,
+		Product_Type,
+		lp.labs_uploaded_method_nm
+Order by lp.calendar_dt,
+		Platform,
+		Product_Type,
+		lp.labs_uploaded_method_nm) as t group by t.labs_uploaded_method_nm,t.cal_dt;	
+
+
+
+select lp.calendar_dt,
+--count(Case When lp.mm_id is not null then 1 Else Null End) as Assigned_Cases,
+case when count(Case When lp.mm_id is not null then 1 Else Null End)>0 then ((count(Case When lp.mm_id is not null and Lab_Start_Dt is not Null then 1 Else Null End) *100)/count(Case When lp.mm_id is not null then 1 Else Null End)) Else 0 End as Percent_Assigned_Cases_With_Labs
+from edw_new_business_vw.fact_life_policy_underwriting_vw    lp
+left join edw_semantic_vw.sem_channel_nb_history_vw    p  on   p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+where lp.calendar_dt BETWEEN '2022-10-05' and '2022-10-12'
+and lp.current_status_nm = 'Pending'
+group by lp.calendar_dt order by 1
+ 
+
+-------------------------------------------------------------------------
+
+
+SELECT lp.calendar_dt,
+AVG(Case When lp.decision_dt= '2022-09-22' then lp.decision_time_nr Else Null End) as Mean_Decision_Time
+from edw_new_business_vw.fact_life_policy_underwriting_vw    lp
+where lp.calendar_dt='2022-09-22'
+group by lp.calendar_dt;
+
+
+------------------------------------------------------------------------------
+select lp.calendar_dt,
+count(lp.policy_nr) as Final_Decisions_Made,
+count(distinct(lp.mm_id )) as Underwriters_That_Made_Final_Decisions,
+count(lp.policy_nr)/count(distinct(lp.mm_id)) as Avg_Decisions_per_Underwriter
+from edw_new_business_vw.fact_life_policy_underwriting_vw    lp
+where lp.calendar_dt ='2022-09-22'
+and lp.decision_dt='2022-09-22'
+and lp.lp.mm_id  is not null
+group by lp.calendar_dt
+
+
+/*Avg Number of Cases Per Underwriter*/
+select lp.calendar_dt,
+		count(lp.policy_nr)/count(distinct(lp.underwriter_mmid)) as Avg_Decisions_per_Underwriter
+from edw_bi_analytics_vw.fact_life_policy_underwriting_vw lp
+where lp.calendar_dt= '2022-12-05'
+and lp.decision_dt= '2022-12-05'
+and lp.underwriter_mmid is not null
+group by lp.calendar_dt
+
+
+
+select lp.calendar_dt,
+case when count(Case When lp.mm_id is not null and lp.current_status_nm='Pending' then 1 Else Null End)>0 
+			then ((count(Case When lp.mm_id is not null and lp.current_status_nm='Pending' and lp.lab_start_dt is not Null then 1 Else Null End) *100)/count(Case When lp.mm_id is not null and lp.current_status_nm='Pending' then 1 Else Null End))
+			Else 0 End as Percent_Assigned_Cases_With_Labs
+from edw_new_business_vw.fact_life_policy_underwriting_vw  lp
+left join edw_semantic_vw.sem_channel_nb_history_vw  p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+where lp.calendar_dt BETWEEN '2022-12-04' and '2022-12-11'
+  and lp.current_status_nm = 'Pending'
+group by lp.calendar_dt order by 1;
+
+
+------------------------------------------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+--decisions page
+AVG(Case When lp.decision_dt BETWEEN '2022-09-07' and '2022-10-06' then lp.decision_time_nr Else Null End) as Mean_Decision_Time
+from edw_new_business_vw.fact_life_policy_underwriting_vw    lp
+where lp.calendar_dt = '2022-10-05'
+groSELECT lp.calendar_dt,
+up by lp.calendar_dt;
+
+
+/*Underwriter deide policies*/
+/*Underwriter Decided Policies*/
+Select 	lp.calendar_dt,
+		lp.policy_nr,
+		lp.mm_id, 
+		Concat(CONCAT(voltageaccess(u.last_nm,'name'),', '),voltageaccess(u.first_nm,'name')) as Underwriter_Full_Nm,
+		p.channel_nm as Platform, 
+		sp.product_type_cde as Product_Type, 
+		lp.health_class_desc,
+		lp.current_status_nm, 
+		lp.face_amt,
+		lp.gender_cde,
+		lp.insured_age_nr,
+		lp.uw_method_nm as Underwriting_Method,
+	--	lp.lite_touch_path_nm as Case_Recommendation, 
+		case when lp.lab_start_dt is not null then 'Yes' else 'No' End as With_Labs,
+		lp.labs_uploaded_method_nm, 
+		case when lp.case_pushed_ind='1' then 'Yes' else 'No' End as Pushed_ind,
+		case when lp.case_pulled_ind='1' then 'Yes' else 'No' End as Pulled_ind,
+		lp.aps_request_cnt as APS_Ordered_ct,
+		lp.aps_opened_cnt as APS_Opened_ct,
+		lp.followup_cnt as Followup_ct,
+		lp.decision_time_nr as Days_Assigned,
+		lp.decision_dt 
+from edw_new_business_vw.fact_life_policy_underwriting_vw  	 lp
+left join edw_ref_non_standard_vw.ref_non_standard_product_history_vw sp On lp.non_standard_ref_product_natural_key_hash_uuid = sp.ref_non_standard_product_natural_key_hash_uuid 
+left join edw_semantic_vw.sem_channel_nb_history_vw   p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+left join edw_semantic_vw.sem_underwriter_nb_history_vw    u on   u.dim_underwriter_natural_key_hash_uuid = lp.dim_underwriter_natural_key_hash_uuid
+where lp.calendar_dt= '2022-10-24'
+and lp.decision_dt between '2022-09-28' and '2022-10-27'
+--and lp.mm_id is not null
+order by lp.calendar_dt, Days_Assigned desc, lp.face_amt desc, lp.policy_nr
+
+
+/*Assigned policies*/
+/*--Assigned Policies Date Range*/
+select lp.calendar_dt, 
+		lp.mm_id,
+		Concat(CONCAT(voltageaccess(u.last_nm,'name'),', '),voltageaccess(u.first_nm,'name')) as Underwriter_Full_Nm,
+		count(lp.policy_nr) as Assigned_Cases,
+		count(Case When lp.met_decision_sla_desc in ('Did not meet Decision SLA', 'Decision passed due') then 1 Else Null End) as Assigned_Cases_Past_SLA
+from edw_new_business_vw.fact_life_policy_underwriting_vw    lp
+left join edw_semantic_vw.sem_channel_nb_history_vw    p  on   p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+left join edw_semantic_vw.sem_underwriter_nb_history_vw    u on   u.dim_underwriter_natural_key_hash_uuid = lp.dim_underwriter_natural_key_hash_uuid
+left join edw_bi_analytics_vw.dim_teams_out_of_office_history_vw oo on oo.associate_id = lp.mm_id and oo.out_of_office_dt=lp.calendar_dt
+where lp.calendar_dt = '2022-10-24'
+and lp.assigned_dt between '2022-09-28' and '2022-10-27'
+and lp.mm_id is not null
+group by lp.calendar_dt,
+		lp.mm_id,
+		Underwriter_Full_Nm
+Having Assigned_Cases >0 
+	or Assigned_Cases_Past_SLA>0 
+Order by lp.calendar_dt,
+		Underwriter_Full_Nm--,
+
+
+
+
+/*Decided policies*/
+/*-Underwriter Decided Policy Productivity Date Range*/
+select lp.calendar_dt, 
+		lp.mm_id,
+		Concat(CONCAT(voltageaccess(u.last_nm,'name'),', '),voltageaccess(u.first_nm,'name')) as Underwriter_Full_Nm,
+		Count(lp.policy_nr) as Final_Decisions_Made,
+	--	count(lp.policy_nr)/ <insert number of days in decision date range here> as Avg_Decisions_Per_Day,
+		Count(case when lp.lab_start_dt is not Null then 1 else Null End) as Decisions_with_Labs,
+		Count(Case When lp.followup_cnt>0 then 1 Else Null End) as Decisions_Needing_Followup,
+		Count(Case When lp.aps_request_cnt>0 then 1 Else Null End) as Decisions_Needing_APS,
+		case when Count(lp.policy_nr)>0 then ((Count(Case When lp.aps_request_cnt>0 then 1 Else Null End) *100)/Count(lp.policy_nr)) Else 0 End as Percent_Decisions_Needing_APS,
+		AVG(lp.decision_time_nr) as Mean_Decision_Time
+from edw_new_business_vw.fact_life_policy_underwriting_vw lp
+left join edw_semantic_vw.sem_channel_nb_history_vw   p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+left join edw_semantic_vw.sem_underwriter_nb_history_vw    u on   u.dim_underwriter_natural_key_hash_uuid = lp.dim_underwriter_natural_key_hash_uuid
+where lp.calendar_dt= '2022-10-27'
+and lp.decision_dt between '2022-09-28' and '2022-10-27'
+group by lp.calendar_dt,
+		lp.mm_id,
+		Underwriter_Full_Nm--,
+Having Final_Decisions_Made>0 
+--	or Avg_Decisions_Per_Day>0
+	or Decisions_with_Labs>0
+	or Decisions_Needing_APS>0 
+	or Percent_Decisions_Needing_APS>0
+	or Decisions_Needing_Followup>0
+	or Mean_Decision_Time>0 
+Order by lp.calendar_dt,
+		Underwriter_Full_Nm--,
+
+
+------------------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------------------
+
+/*Team daily case summary-- new columns*/
+
+With TDate AS
+( SELECT '2022-10-24'::DATE AS targetDate)
+select lp.calendar_dt,
+	COALESCE(oo.associate_team_nm,'Other') as Team_Name,
+--		u.mm_id,
+--		Concat(CONCAT(u.last_nm,', '),u.first_nm) as Underwriter_Full_Nm,
+		sum(lp.activity_cnt) as Activity_Count,
+		sum(lp.aps_request_cnt) as APS_Ordered_Ct,
+		sum(lp.aps_opened_cnt) as APS_Opened_Ct
+from edw_new_business_vw.fact_underwriter_daily_activity_summary_vw lp
+Join TDate on 1=1
+left join edw_semantic_vw.sem_channel_nb_history_vw  p on p.dim_channel_natural_key_hash_uuid = lp.dim_channel_natural_key_hash_uuid
+left join edw_semantic_vw.sem_underwriter_nb_history_vw  u on u.dim_underwriter_natural_key_hash_uuid = lp.dim_underwriter_natural_key_hash_uuid
+left join edw_bi_analytics_vw.dim_teams_out_of_office_history_vw oo on oo.associate_id = lp.mm_id and oo.out_of_office_dt=lp.calendar_dt
+where lp.calendar_dt=(Select TargetDate from TDate)
+and  u.mm_id is not null
+group by lp.calendar_dt,
+		Team_Name--,
+	--	u.mm_id,
+	--	Underwriter_Full_Nm
+Having Activity_Count >0
+	or APS_Ordered_Ct>0
+	or APS_Opened_Ct>0
+Order by lp.calendar_dt,
+		Team_Name
+
+
+
+/*Team daily case summary-- old columns*/
+
+With TDate AS
+( SELECT '2022-11-24'::DATE AS targetDate)
+select lp.calendar_dt, 
+		COALESCE(oo.associate_team_nm,'Other') as Team_Name,
+		count(Case When lp.mm_id is not null and lp.current_status_nm='Pending' then 1 Else Null End) as Assigned_Cases,
+		count(Case When lp.mm_id is not null and lp.assigned_dt=TargetDate then 1 Else Null End) as Cases_Assigned_Yesterday,
+		case when count(Case When lp.mm_id is not null and lp.current_status_nm='Pending' then 1 Else Null End)>0 then ((count(Case When lp.mm_id is not null and lp.current_status_nm='Pending' and lp.lab_start_dt is not Null then 1 Else Null End) *100)/count(Case When lp.mm_id is not null and lp.current_status_nm='Pending' then 1 Else Null End)) Else 0 End as Percent_Assigned_Cases_With_Labs,
+		count(Case When lp.mm_id is not null and lp.current_status_nm='Pending' and lp.met_decision_sla_desc in ('Did not meet Decision SLA', 'Decision passed due') then 1 Else Null End) as Assigned_Cases_Past_SLA,
+		count(Case When lp.decision_dt=TargetDate then 1 Else Null End) as Final_Decisions_Made,
+		Count(Case When lp.decision_dt=TargetDate and lp.aps_request_cnt>0 then 1 Else Null End) as Decisions_Needing_APS,
+		Count(Case When lp.decision_dt=TargetDate and lp.followup_cnt>0 then 1 Else Null End) as Decisions_Needing_Followup,
+		AVG(Case When lp.decision_dt=TargetDate then lp.decision_time_nr Else Null End) as Mean_Decision_Time
+	--	case when count(Case When lp.decision_dt=(CURRENT_DATE()-1) then 1 Else Null End)>0 then ((Count(Case When lp.decision_dt=(CURRENT_DATE()-1) and lp.aps_request_cnt>0 then 1 Else Null End) *100)/count(Case When lp.decision_dt=(CURRENT_DATE()-1) then 1 Else Null End)) Else 0 End as Percent_Decisions_Needing_APS
+from edw_new_business_vw.fact_life_policy_underwriting_vw lp
+left join edw_semantic_vw.sem_channel_nb_history_vw   p on  p.dim_channel_natural_key_hash_uuid = lp.dim_channel_natural_key_hash_uuid
+left join edw_semantic_vw.sem_underwriter_nb_history_vw   u on u.dim_underwriter_natural_key_hash_uuid = lp.dim_underwriter_natural_key_hash_uuid
+left join edw_bi_analytics_vw.dim_teams_out_of_office_history_vw oo on oo.associate_id = lp.mm_id and oo.out_of_office_dt=lp.calendar_dt
+Join TDate on 1=1
+where lp.calendar_dt='2022-10-24'
+group by lp.calendar_dt,
+		Team_Name
+Having Assigned_Cases >0 
+	or Cases_Assigned_Yesterday>0 
+	or Percent_Assigned_Cases_With_Labs>0 
+	or Assigned_Cases_Past_SLA>0 
+	or Final_Decisions_Made>0 
+	or Decisions_Needing_APS>0 
+	or Decisions_Needing_Followup>0
+	or Mean_Decision_Time>0 
+Order by lp.calendar_dt,
+		Team_Name
+
+
+
+
+/* Team assigned policies*/
+			
+Select  lp.calendar_dt,		
+		lp.policy_nr,	
+		COALESCE(oo.associate_team_nm,'Other') as Team_Name,	
+		lp.mm_id, 	
+		Concat(CONCAT(voltageaccess(u.last_nm,'name'),', '),voltageaccess(u.first_nm,'name')) as Underwriter_Full_Nm,
+		p.channel_nm as Platform, 	
+		sp.product_type_cde as Product_Type, 	
+		lp.health_class_desc,	
+		lp.face_amt,	
+		lp.insured_age_nr,
+		lp.gender_cde,	
+		lp.uw_method_nm as Underwriting_Method,	
+	--	lp.lite_touch_path_nm as Case_Recommendation, 	
+		case when lp.lab_start_dt is not null then 'Yes' else 'No' End as With_Labs,	
+		lp.labs_uploaded_method_nm, 	
+		case when lp.case_pushed_ind='1' then 'Yes' else 'No' End as Pushed_ind,	
+		case when lp.case_pulled_ind='1' then 'Yes' else 'No' End as Pulled_ind,	
+		lp.aps_request_cnt as APS_Ordered_ct,	
+		lp.aps_opened_cnt as APS_Opened_ct,	
+		lp.followup_cnt as Followup_ct,	
+		lp.decision_time_nr as Days_Assigned,	
+		lp.decision_dt as Decision_Dt	
+from edw_new_business_vw.fact_life_policy_underwriting_vw lp			
+left join edw_semantic_vw.sem_channel_nb_history_vw  p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+left join edw_ref_non_standard_vw.ref_non_standard_product_history_vw sp On lp.non_standard_ref_product_natural_key_hash_uuid = sp.ref_non_standard_product_natural_key_hash_uuid 
+left join edw_semantic_vw.sem_underwriter_nb_history_vw  u on u.dim_underwriter_natural_key_hash_uuid = lp.dim_underwriter_natural_key_hash_uuid
+left join edw_bi_analytics_vw.dim_teams_out_of_office_history_vw oo on oo.associate_id =lp.mm_id and oo.out_of_office_dt=lp.calendar_dt			
+where lp.calendar_dt='2022-10-24'			
+and lp.current_status_nm='Pending'			
+and lp.mm_id is not null			
+order by lp.calendar_dt, Days_Assigned desc, lp.face_amt desc, lp.policy_nr	
+
+
+/* Assigned policies*/
+
+select lp.calendar_dt, 
+		COALESCE(oo.associate_team_nm,'Other') as Team_Name,
+		count(lp.policy_nr) as Assigned_Cases,
+		count(Case When lp.met_decision_sla_desc in ('Did not meet Decision SLA', 'Decision passed due') then 1 Else Null End) as Assigned_Cases_Past_SLA
+from edw_new_business_vw.fact_life_policy_underwriting_vw lp
+left join edw_semantic_vw.sem_channel_nb_history_vw  p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+left join edw_semantic_vw.sem_underwriter_nb_history_vw  u on u.dim_underwriter_natural_key_hash_uuid = lp.dim_underwriter_natural_key_hash_uuid
+left join edw_bi_analytics_vw.dim_teams_out_of_office_history_vw oo on oo.associate_id = lp.mm_id and oo.out_of_office_dt=lp.calendar_dt
+where lp.calendar_dt ='2022-10-24'
+and lp.assigned_dt between '2022-09-28' and '2022-10-27'
+and lp.mm_id is not null
+group by lp.calendar_dt,
+		Team_Name--,
+Having Assigned_Cases >0 
+	or Assigned_Cases_Past_SLA>0 
+Order by lp.calendar_dt,
+		Team_Name
+
+
+
+
+/*Decided policies*/
+			
+select lp.calendar_dt, 
+		COALESCE(oo.associate_team_nm,'Other') as Team_Name,
+		Count(lp.policy_nr) as Final_Decisions_Made,
+	--	count(lp.policy_nr)/ <insert number of days in decision date range here> as Avg_Decisions_Per_Day,
+		Count(case when lp.lab_start_dt is not Null then 1 else Null End) as Decisions_with_Labs,
+		Count(Case When lp.aps_request_cnt>0 then 1 Else Null End) as Decisions_Needing_APS,
+		case when Count(lp.policy_nr)>0 then ((Count(Case When lp.aps_request_cnt>0 then 1 Else Null End) *100)/Count(lp.policy_nr)) Else 0 End as Percent_Decisions_Needing_APS,
+		Count(Case When lp.followup_cnt>0 then 1 Else Null End) as Decisions_Needing_Followup,
+		AVG(lp.decision_time_nr) as Mean_Decision_Time
+from edw_new_business_vw.fact_life_policy_underwriting_vw  lp
+left join edw_semantic_vw.sem_channel_nb_history_vw  p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+left join edw_semantic_vw.sem_underwriter_nb_history_vw  u on u.dim_underwriter_natural_key_hash_uuid = lp.dim_underwriter_natural_key_hash_uuid
+left join edw_bi_analytics_vw.dim_teams_out_of_office_history_vw oo on oo.associate_id = lp.mm_id and oo.out_of_office_dt=lp.calendar_dt
+where lp.calendar_dt='2022-10-24'
+and lp.decision_dt between '2022-09-28' and '2022-10-27'
+group by lp.calendar_dt,
+		Team_Name
+Having Final_Decisions_Made>0 
+--	or Avg_Decisions_Per_Day>0
+	or Decisions_with_Labs>0
+	or Decisions_Needing_APS>0 
+	or Percent_Decisions_Needing_APS>0
+	or Decisions_Needing_Followup>0
+	or Mean_Decision_Time>0 
+Order by lp.calendar_dt,
+		Team_Name		
+
+
+/*Team decided cases*/
+
+Select 	lp.calendar_dt,
+		lp.policy_nr,
+		COALESCE(oo.associate_team_nm,'Other') as Team_Name,
+		lp.mm_id, 
+		Concat(CONCAT(voltageaccess(u.last_nm,'name'),', '),voltageaccess(u.first_nm,'name')) as Underwriter_Full_Name,
+		p.channel_nm as Platform, 
+		sp.product_type_cde as Product_Type, 
+		lp.health_class_desc,
+		lp.current_status_nm, 
+		lp.face_amt,
+		lp.insured_age_nr,
+		lp.gender_cde,
+		lp.uw_method_nm as Underwriting_Method,
+	--	lp.lite_touch_path_nm as Case_Recommendation, 
+		case when lp.lab_start_dt is not null then 'Yes' else 'No' End as With_Labs,
+		lp.labs_uploaded_method_nm, 
+		case when lp.case_pushed_ind='1' then 'Yes' else 'No' End as Pushed_ind,
+		case when lp.case_pulled_ind='1' then 'Yes' else 'No' End as Pulled_ind,
+		lp.aps_request_cnt as APS_Ordered_ct,
+		lp.aps_opened_cnt as APS_Opened_ct,
+		lp.followup_cnt as Followup_ct,
+		lp.decision_time_nr as Days_Assigned,
+		lp.decision_dt--, 
+	--	i.InsuredAgeBand,
+	--	lp.face_amt_band,	
+from edw_new_business_vw.fact_life_policy_underwriting_vw lp
+left join edw_ref_non_standard_vw.ref_non_standard_product_history_vw sp On lp.non_standard_ref_product_natural_key_hash_uuid = sp.ref_non_standard_product_natural_key_hash_uuid 
+left join edw_semantic_vw.sem_channel_nb_history_vw  p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+left join edw_semantic_vw.sem_underwriter_nb_history_vw  u on u.dim_underwriter_natural_key_hash_uuid = lp.dim_underwriter_natural_key_hash_uuid
+left join edw_bi_analytics_vw.dim_teams_out_of_office_history_vw oo on oo.associate_id = lp.mm_id and oo.out_of_office_dt=lp.calendar_dt
+--left join edw_ref_non_standard_vw.ref_non_standard_band_range_vw I on i.ref_non_standard_band_range_natural_key_hash_uuid = lp.non_standard_ref_insured_age_band_natural_key_hash_uuid
+--and i.band_range_type_nm= 'Insured Age Band'
+where lp.calendar_dt='2022-10-24'
+and lp.decision_dt between '2022-09-28' and '2022-10-27'
+order by lp.calendar_dt, Days_Assigned desc, lp.face_amt desc, lp.policy_nr	
+
+
+/*Trend analysis grid 1 */
+
+With CTE As
+(Select lp.calendar_dt,Count(lp.policy_nr) as TotalDecisions
+from edw_new_business_vw.fact_life_policy_underwriting_vw lp
+where lp.calendar_dt = '2022-10-12'
+and lp.decision_dt between '2022-09-17' and '2022-10-16' 
+Group by lp.calendar_dt
+)
+select lp.calendar_dt, 
+		Concat(CONCAT(voltageaccess(u.last_nm,'name'),', '),voltageaccess(u.first_nm,'name')) as Underwriter_Full_Name,
+		Count(Case when lp.issued_dt is not null then 1 Else Null End) as Issued_Policies_Ct,
+		--Count(Case when lp.decline_dt is not null then 1 Else Null End) as Declined_Policies_Ct,
+		Count(Case when lp.current_status_nm in ('Declined')  then 1 Else Null End) as Declined_Policies_Ct,
+		Count(Case When lp.aps_request_cnt>0 then 1 Else Null End) as Decisions_Needing_APS,
+		case when Count(lp.policy_nr)>0 then ((Count(Case When lp.aps_request_cnt>0 then 1 Else Null End) *100)/Count(lp.policy_nr)) Else 0 End as Percent_Decisions_Needing_APS,
+		Count(Case When lp.followup_cnt>0 then 1 Else Null End) as Decisions_Needing_Followup,
+		case when Count(lp.policy_nr)>0 then ((Count(Case When lp.followup_cnt>0 then 1 Else Null End) *100)/Count(lp.policy_nr)) Else 0 End as Percent_Decisions_Needing_Followup,
+		Count(lp.policy_nr) as Decisions_Ct,
+		AVG(lp.decision_time_nr) as Mean_Decision_Time,
+		case when TotalDecisions >0 then ((Count(lp.policy_nr) *100)/TotalDecisions) Else 0 End as Percent_Of_Total
+from edw_new_business_vw.fact_life_policy_underwriting_vw lp
+left join edw_semantic_vw.sem_channel_nb_history_vw  p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+left join edw_semantic_vw.sem_underwriter_nb_history_vw  u on u.dim_underwriter_natural_key_hash_uuid = lp.dim_underwriter_natural_key_hash_uuid
+--left join edw_ref_non_standard_vw.ref_non_standard_band_range_vw I on i.ref_non_standard_band_range_natural_key_hash_uuid = lp.non_standard_ref_insured_age_band_natural_key_hash_uuid
+--and i.band_range_type_nm= 'Insured Age Band'
+left join edw_bi_analytics_vw.dim_teams_out_of_office_history_vw oo on oo.associate_id = lp.mm_id and oo.out_of_office_dt=lp.calendar_dt
+join CTE on CTE.calendar_dt = lp.calendar_dt
+where lp.calendar_dt = '2022-10-12'
+and lp.decision_dt between '2022-09-17' and '2022-10-16' 
+group by lp.calendar_dt,
+		Underwriter_Full_Name,TotalDecisions	
+Having Issued_Policies_Ct>0
+	or Declined_Policies_Ct>0
+	or Decisions_Needing_APS>0 
+	or Percent_Decisions_Needing_APS>0
+	or Decisions_Needing_Followup>0
+	or Percent_Decisions_Needing_Followup>0
+	or Decisions_Ct>0 
+	or Mean_Decision_Time>0
+	or Percent_Of_Total>0	
+Order by lp.calendar_dt,
+		Underwriter_Full_Name ASC;	
+
+
+
+
+/*Tred analysis grid2*/
+
+With CTE As
+(Select lp.calendar_dt,Count(lp.policy_nr) as TotalDecisions
+from edw_new_business_vw.fact_life_policy_underwriting_vw lp
+where lp.calendar_dt= '2022-10-12'
+and lp.decision_dt between '2022-09-17' and '2022-10-17'
+Group by lp.calendar_dt
+)
+select lp.calendar_dt, 
+		Concat(CONCAT(voltageaccess(u.last_nm,'name'),', '),voltageaccess(u.first_nm,'name')) as Underwriter_Full_Name,
+		/*Count(Case when lp.issued_dt is not null then 1 Else Null End) as Issued_Policies_Ct,
+		--Count(Case when lp.decline_dt is not null then 1 Else Null End) as Declined_Policies_Ct,
+		Count(Case when lp.current_status_nm in ('Declined')  then 1 Else Null End) as Declined_Policies_Ct,
+		Count(Case When lp.aps_request_cnt>0 then 1 Else Null End) as Decisions_Needing_APS,
+		case when Count(lp.policy_nr)>0 then ((Count(Case When lp.aps_request_cnt>0 then 1 Else Null End) *100)/Count(lp.policy_nr)) Else 0 End as Percent_Decisions_Needing_APS,
+		Count(Case When lp.followup_cnt>0 then 1 Else Null End) as Decisions_Needing_Followup,*/
+		--case when Count(lp.policy_nr)>0 then ((Count(Case When lp.followup_cnt>0 then 1 Else Null End) *100)/Count(lp.policy_nr)) Else 0 End as Percent_Decisions_Needing_Followup,
+		Count(lp.policy_nr) as Decisions_Ct,
+		AVG(lp.decision_time_nr) as Mean_Decision_Time
+		--case when TotalDecisions >0 then ((Count(lp.policy_nr) *100)/TotalDecisions) Else 0 End as Percent_Of_Total
+from edw_new_business_vw.fact_life_policy_underwriting_vw lp
+left join edw_semantic_vw.sem_channel_nb_history_vw  p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+left join edw_semantic_vw.sem_underwriter_nb_history_vw  u on u.dim_underwriter_natural_key_hash_uuid = lp.dim_underwriter_natural_key_hash_uuid
+--left join edw_ref_non_standard_vw.ref_non_standard_band_range_vw i on i.ref_non_standard_band_range_natural_key_hash_uuid = lp.non_standard_ref_insured_age_band_natural_key_hash_uuid
+--and i.band_range_type_nm= 'Insured Age Band'
+left join edw_bi_analytics_vw.dim_teams_out_of_office_history_vw oo on oo.associate_id = lp.mm_id and oo.out_of_office_dt=lp.calendar_dt
+join CTE on CTE.calendar_dt = lp.calendar_dt
+where lp.calendar_dt= '2022-10-12'
+and lp.decision_dt between '2022-09-17' and '2022-10-17'
+group by lp.calendar_dt,
+		Underwriter_Full_Name,TotalDecisions	
+Having /*--Issued_Policies_Ct>0
+	 Declined_Policies_Ct>0
+	or Decisions_Needing_APS>0 
+	or Percent_Decisions_Needing_APS>0
+	or Decisions_Needing_Followup>0
+	or Percent_Decisions_Needing_Followup>0*/
+	 Decisions_Ct>0 
+	or Mean_Decision_Time>0
+	--or Percent_Of_Total>0	
+Order by lp.calendar_dt,
+		Underwriter_Full_Name ASC;
+
+
+/*TA Grid-2*/
+
+select lp.calendar_dt, 
+		Concat(CONCAT(u.last_nm,', '),u.first_nm) as Underwriter_Full_Name,
+		Count(lp.policy_nr) as Decisions_Ct,
+		AVG(lp.decision_time_nr) as Mean_Decision_Time from edw_new_business_vw.fact_life_policy_underwriting_vw lp 
+left join edw_semantic_vw.sem_channel_nb_history_vw  p  on     p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+left join edw_semantic_vw.sem_underwriter_nb_history_vw  u on  u.dim_underwriter_natural_key_hash_uuid = lp.dim_underwriter_natural_key_hash_uuid
+left join edw_bi_analytics_vw.dim_teams_out_of_office_history_vw  oo on oo.associate_id = lp.mm_id and oo.out_of_office_dt=lp.calendar_dt
+--join CTE on CTE.calendar_dt = lp.calendar_dt 
+where lp.calendar_dt= '2022-12-08'
+and lp.decision_dt between '2022-11-14' and '2022-12-13' 
+group by lp.calendar_dt,Underwriter_Full_Name
+Having 
+	 Decisions_Ct>0 
+	or Mean_Decision_Time>0
+Order by lp.calendar_dt,
+		Underwriter_Full_Name ASC;
+
+
+
+/*Trend analysis grid 3*/
+
+Select 	--lp.calendar_dt,
+		lp.policy_nr,
+		p.channel_nm as Platform, 
+		sp.product_type_cde as Product_Type,
+		COALESCE(oo.associate_team_nm,'Other') as Team_Name,
+		--lp.mm_id,  
+		Concat(CONCAT(voltageaccess(u.last_nm,'name'),', '),voltageaccess(u.first_nm,'name')) as Underwriter_Full_Name,		
+		lp.health_class_desc,
+		lp.current_status_nm, 
+		lp.face_amt,
+		lp.insured_age_nr,
+		lp.gender_cde,
+		lp.uw_method_nm as Underwriting_Method,
+	--	lp.lite_touch_path_nm as Case_Recommendation, 
+		case when lp.lab_start_dt is not null then 'Yes' else 'No' End as With_Labs,
+		lp.labs_uploaded_method_nm, 
+		case when lp.case_pushed_ind='1' then 'Yes' else 'No' End as Pushed_ind,
+		case when lp.case_pulled_ind='1' then 'Yes' else 'No' End as Pulled_ind,
+		lp.aps_request_cnt as APS_Ordered_ct,
+		lp.aps_opened_cnt as APS_Opened_ct,
+		lp.followup_cnt as Followup_ct,
+		lp.decision_time_nr as Days_Assigned,
+		lp.decision_dt--, 
+	--	i.InsuredAgeBand,
+	--	lp.face_amt_band,	
+from edw_new_business_vw.fact_life_policy_underwriting_vw lp
+left join edw_semantic_vw.sem_channel_nb_history_vw  p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+left join edw_semantic_vw.sem_underwriter_nb_history_vw  u on u.dim_underwriter_natural_key_hash_uuid = lp.dim_underwriter_natural_key_hash_uuid
+left join edw_bi_analytics_vw.dim_teams_out_of_office_history_vw oo on oo.associate_id = lp.mm_id and oo.out_of_office_dt=lp.calendar_dt
+--left join edw_ref_non_standard_vw.ref_non_standard_product_current_vw  sp on sp.ref_non_standard_product_natural_key_hash_uuid  = lp.dim_underwriter_natural_key_hash_uuid
+left join edw_ref_non_standard_vw.ref_non_standard_product_history_vw sp On lp.non_standard_ref_product_natural_key_hash_uuid = sp.ref_non_standard_product_natural_key_hash_uuid 
+left join edw_ref_non_standard_vw.ref_non_standard_band_range_vw I on i.ref_non_standard_band_range_natural_key_hash_uuid = lp.non_standard_ref_insured_age_band_natural_key_hash_uuid
+and i.band_range_type_nm= 'Insured Age Band'
+where lp.calendar_dt='2022-10-12'
+and lp.decision_dt between '2022-09-17' and '2022-10-16'
+order by lp.calendar_dt, Days_Assigned desc, lp.face_amt desc, lp.policy_nr	ASC;
+
+
+
+
+/* Trend Analysis SO */
+select 	lp.calendar_dt,
+		p.channel_nm as Platform,
+		sp.product_type_cde as Product_Type,
+		lp.uw_method_nm as Underwriter_Method,
+		count(Case When lp.mm_id  is not null and lp.current_status_nm='Pending' and lp.met_decision_sla_desc in ('Did not meet Decision SLA', 'Decision passed due') then 1 Else Null End) as Assigned_Cases_Past_SLA,
+		case when count(Case When lp.mm_id  is not null and lp.current_status_nm='Pending' then 1 Else Null End)>0 then ((count(Case When lp.mm_id  is not null and lp.current_status_nm='Pending' and lp.met_decision_sla_desc in ('Met Decision SLA', 'Decision not due yet') then 1 Else Null End)) *100)/count(Case When lp.mm_id is not null and lp.current_status_nm='Pending' then 1 Else Null End) Else 0 End as Percent_Assigned_Cases_In_SLA,
+		count(Case When lp.mm_id  is null and lp.current_status_nm='Pending' and lp.in_queue_dt is not null and lp.met_assignment_sla_desc in ('Assignment passed due', 'Did not meet Assignment SLA') then 1 Else Null End) as Unassigned_Cases_Past_SLA,
+		case when count(Case When lp.mm_id  is null and lp.current_status_nm='Pending' and lp.in_queue_dt is not null then 1 Else Null End)>0 then ((count(Case When lp.mm_id is null and lp.current_status_nm='Pending' and lp.in_queue_dt is not null and lp.met_assignment_sla_desc in ('Assignment not due yet','Met Assignment SLA') then 1 Else Null End)) *100)/count(Case When lp.mm_id is null and lp.current_status_nm='Pending' and lp.in_queue_dt is not null then 1 Else Null End) Else 0 End as Percent_Unassigned_Cases_In_SLA,
+		AVG(Case When lp.decision_dt=lp.calendar_dt then lp.decision_time_nr Else NULL End) as Mean_Decision_Time
+from edw_new_business_vw.fact_life_policy_underwriting_vw   lp
+left join edw_semantic_vw.sem_channel_nb_history_vw   p  on    p.dim_channel_natural_key_hash_uuid   =   lp.dim_channel_natural_key_hash_uuid
+left join edw_ref_non_standard_vw.ref_non_standard_product_history_vw sp On lp.non_standard_ref_product_natural_key_hash_uuid = sp.ref_non_standard_product_natural_key_hash_uuid 
+where lp.calendar_dt= '2022-12-13'-- BETWEEN '2022-10-01'  and '2022-10-27'
+group by lp.calendar_dt,
+		Platform
+		,Product_Type
+		,Underwriter_Method
+Having 	(Assigned_Cases_Past_SLA >0  or Percent_Assigned_Cases_In_SLA>0 or  Unassigned_Cases_Past_SLA>0 or Percent_Unassigned_Cases_In_SLA>0 or Mean_Decision_Time>0) 	
+Order by lp.calendar_dt asc,
+		Platform
+		,Product_Type
+		,Underwriter_Method
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,207 @@
+--Placement Activity by month and year
+WITH vitalDates AS (
+SELECT '2022-03-31'::DATE AS targetDate
+),
+aggs AS (
+SELECT DATE_PART('YEAR',lpf.reporting_status_dt) AS IssueYear
+,COUNT(lpf.policy_nr) TotPolicies
+,CASE WHEN lpf.reporting_status_nm = 'Declined' THEN COUNT(lpf.policy_nr) ELSE NULL END AS 'Declined'
+,CASE WHEN lpf.reporting_status_nm = 'Incomplete/Withdrawn' THEN COUNT(lpf.policy_nr) ELSE NULL END AS 'Incomplete'
+,CASE WHEN lpf.reporting_status_nm = 'Not Taken' THEN COUNT(lpf.policy_nr) ELSE NULL END AS 'Not_Taken'
+,CASE WHEN lpf.reporting_status_nm = 'Reported' THEN COUNT(lpf.policy_nr) ELSE NULL END AS 'Reported'
+FROM 
+edw_new_business_vw.fact_life_policy_vw         lpf
+--LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw rep on rep.calendar_dt = lpf.reporting_status_dt
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN vitalDates vd ON 1=1
+WHERE lpf.reporting_status_nm IN ( 'Reported','Declined','Incomplete/Withdrawn','Not Taken')
+AND lpf.reporting_status_dt BETWEEN DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR',-2,vd.targetDate)) AND vd.targetDate
+GROUP BY 1, lpf.reporting_status_nm
+),
+Main AS
+(SELECT IssueYear
+,Sum(TotPolicies) Total
+, Sum(Declined) Declined
+,Sum(Incomplete) Incomplete
+,Sum(Not_Taken) Not_Taken
+,Sum(Reported) Reported
+FROM aggs
+Group by IssueYear
+)
+SELECT IssueYear,Declined
+,Declined/Total * 100 as 'Percentage Declined'
+,Incomplete
+,Incomplete/Total * 100 as 'Percentage Incomplete'
+,Not_Taken
+,Not_Taken/Total * 100 as 'Percentage Not_Taken'
+,Reported
+,Reported/Total * 100 as 'Percentage Reported'
+FROM Main
+ORDER BY 1,2;
+
+
+Premium Placement Activity by month and year
+WITH vitalDates AS (
+SELECT '2022-03-31'::DATE AS targetDate
+),
+aggs AS (
+SELECT DATE_PART('YEAR',lpf.reporting_status_dt) AS IssueYear
+,SUM(lpf.annualized_premium_amt) TotPremium
+,CASE WHEN lpf.reporting_status_nm = 'Declined' THEN SUM(lpf.annualized_premium_amt) ELSE NULL END AS 'Declined'
+,CASE WHEN lpf.reporting_status_nm = 'Incomplete/Withdrawn' THEN SUM(lpf.annualized_premium_amt) ELSE NULL END AS 'Incomplete'
+,CASE WHEN lpf.reporting_status_nm = 'Not Taken' THEN SUM(lpf.annualized_premium_amt) ELSE NULL END AS 'Not_Taken'
+,CASE WHEN lpf.reporting_status_nm = 'Reported' THEN SUM(lpf.annualized_premium_amt) ELSE NULL END AS 'Reported'
+from edw_new_business_vw.fact_life_policy_vw         lpf
+--LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw rep on rep.calendar_dt = lpf.reporting_status_dt
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN vitalDates vd ON 1=1
+WHERE lpf.reporting_status_nm IN ( 'Reported','Declined','Incomplete/Withdrawn','Not Taken')
+AND lpf.reporting_status_dt BETWEEN DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR',-2,vd.targetDate)) AND vd.targetDate
+GROUP BY 1,lpf.reporting_status_nm
+),
+Main AS
+(SELECT IssueYear
+,Sum(TotPremium) Total
+, Sum(Declined) Declined
+,Sum(Incomplete) Incomplete
+,Sum(Not_Taken) Not_Taken
+,Sum(Reported) Reported
+FROM aggs
+Group by IssueYear
+)
+SELECT IssueYear,Declined
+,Declined/Total * 100 as 'Percentage Declined'
+,Incomplete
+,Incomplete/Total * 100 as 'Percentage Incomplete'
+,Not_Taken
+,Not_Taken/Total * 100 as 'Percentage Not_Taken'
+,Reported
+,Reported/Total * 100 as 'Percentage Reported'
+FROM Main
+ORDER BY 1,2;
+
+
+--Policy Placemeent Rate by month and year
+WITH vitalDates AS (
+SELECT '2022-03-31'::DATE AS targetDate
+),
+repo AS (
+SELECT DATE_PART('YEAR',lpf.reporting_status_dt) AS IssueYear
+, DATE_PART('MONTH',lpf.reporting_status_dt) AS IssueMonth
+, COUNT(lpf.policy_nr) Reported
+FROM edw_new_business_vw.fact_life_policy_vw         lpf
+--LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw rep ON rep.calendar_dt = lpf.reporting_status_dt
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN vitalDates vd ON 1=1
+WHERE  lpf.reporting_status_nm IN ( 'Reported')
+AND lpf.reporting_status_dt BETWEEN DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR',-2,vd.targetDate)) AND vd.targetDate
+GROUP BY 1,2
+)
+,aggs AS (
+SELECT DATE_PART('YEAR',lpf.reporting_status_dt) AS IssueYear
+, DATE_PART('MONTH',lpf.reporting_status_dt) AS IssueMonth
+, COUNT(lpf.policy_nr) actual
+FROM edw_new_business_vw.fact_life_policy_vw         lpf
+--LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw rep ON rep.calendar_dt = lpf.reporting_status_dt
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN vitalDates vd ON 1=1
+WHERE lpf.reporting_status_nm  IN ( 'Reported','Declined','Incomplete/Withdrawn','Not Taken')
+AND lpf.reporting_status_dt BETWEEN DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR',-2,vd.targetDate)) AND vd.targetDate
+GROUP BY 1,2
+)
+SELECT a.IssueYear
+, a.IssueMonth
+, r.Reported
+--, a.actual
+, (r.reported / a.actual) * 100 as PolicyCountMTD
+FROM aggs a join repo r on a.IssueYear = r.IssueYear and a.IssueMonth = r.IssueMonth
+ORDER BY 1,2;
+
+
+
+--Premium Placemeent Rate by month and year
+WITH vitalDates AS (
+SELECT '2022-03-28'::DATE AS targetDate
+),
+repo AS (
+SELECT DATE_PART('YEAR',lpf.reporting_status_dt) AS IssueYear
+, DATE_PART('MONTH',lpf.reporting_status_dt) AS IssueMonth
+, sum(lpf.annualized_premium_amt) Reported
+FROM edw_new_business_vw.fact_life_policy_vw         lpf
+--LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw rep ON rep.calendar_dt = lpf.reporting_status_dt
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN vitalDates vd ON 1=1
+WHERE lpf.reporting_status_nm IN ( 'Reported')
+AND lpf.reporting_status_dt BETWEEN DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR',-2,vd.targetDate)) AND vd.targetDate
+GROUP BY 1,2
+)
+,aggs AS (
+SELECT DATE_PART('YEAR',lpf.reporting_status_dt) AS IssueYear
+, DATE_PART('MONTH',lpf.reporting_status_dt) AS IssueMonth
+, sum(lpf.annualized_premium_amt) actual
+FROM edw_new_business_vw.fact_life_policy_vw         lpf
+--LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw rep ON rep.calendar_dt = lpf.reporting_status_dt
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN vitalDates vd ON 1=1
+WHERE lpf.reporting_status_nm IN ( 'Reported','Declined','Incomplete/Withdrawn','Not Taken')
+AND lpf.reporting_status_dt BETWEEN DATE_TRUNC(
+'YEAR', TIMESTAMPADD('YEAR',-2,vd.targetDate)) AND vd.targetDate
+--and sub.dayDate BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate
+GROUP BY 1,2
+)
+SELECT a.IssueYear
+, a.IssueMonth
+, r.Reported
+, a.actual
+, (r.reported / a.actual) * 100 as PremiumMTD
+FROM aggs a join repo r on a.IssueYear = r.IssueYear and a.IssueMonth = r.IssueMonth
+ORDER BY 1,2;
+
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+--Updated SQL
+--grid SQL
+WITH vitalDates AS (
+SELECT '2022-04-25'::DATE AS targetDate
+),
+aggs AS (
+SELECT
+lpf.distributor_channel_cde --Distribution Channel
+, lpf.face_amt AS FaceAmount
+, age.agency_nm AS FirmName
+,age.agency_id AS FirmNumber
+,chan.channel_nm as platfrom
+, lpf.policy_nr AS PolicyNumber
+, lpf.product_type_cde AS Product
+, prod.product_nm AS ProductCode
+,reporting_status_nm AS ReportingStatus
+, rep.calendar_dt AS ReportingStatusDate
+,lpf.Society1851_ind AS Society1851Indicator
+,aw.full_nm AS SolicitingAdvisorName
+, aw.business_partner_id  AS SolicitingAdvisorNumber
+, lpf.agent_type AS SolicitingAdvisorType
+, sub.calendar_dt AS SubmittedDate
+, lpf.total_annual_premium_amt AS TotalAnnualPremiumAmount
+, lpf.annualized_premium_amt AS WeightedAnnualPremiumAmt
+--, age.agency_nm AS Firm
+FROM edw_new_business_vw.fact_life_policy_vw         lpf
+LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw  sub ON sub.calendar_dt = lpf.application_submit_dt
+LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw  rep ON rep.calendar_dt = lpf.reporting_status_dt
+LEFT OUTER JOIN edw_semantic_vw.sem_party_advisor_nb_current_vw		aw on aw.dim_party_advisor_natural_key_hash_uuid = lpf.dim_party_advisor_natural_key_hash_uuid
+LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw     prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+--LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw 		     prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+LEFT OUTER JOIN edw_semantic_vw.sem_party_agency_nb_current_vw   		age on age.dim_party_agency_natural_key_hash_uuid = lpf.soliciting_agency_dim_party_natural_key_hash_uuid
+LEFT OUTER JOIN vitalDates vd ON 1=1
+WHERE prod.product_type_cde <> 'ROP'
+--AND sub.calendar_dt >= TIMESTAMPADD('YEAR', -1, vd.targetDate)
+--AND lpf.distributor_channel_cde ='DTC'
+AND lpf.reporting_status_nm in ( 'Reported','Declined','Incomplete/Withdrawn','Not Taken')
+and lpf.reporting_status_dt = '2022-04-25'
+GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17
+)
+SELECT *
+FROM aggs agg
+--WHERE COALESCE(mtd_actual, ytd_actual, rolling_12_mo) IS NOT NULL
+ORDER BY 1;

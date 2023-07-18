@@ -1,0 +1,259 @@
+--Issued & Reported
+
+/*Issued volume*/
+WITH vitalDates AS (
+	SELECT '2022-12-13'::DATE AS targetDate
+),
+plans AS (
+	SELECT pf.product_type_cde 
+	, SUM(pf.plan_daily_val) plan_daily_val
+	, SUM(pf.plan_month_to_dt_val)   plan_month_to_dt_val
+	, SUM(pf.plan_year_to_dt_val)   plan_year_to_dt_val
+	FROM edw_new_business_vw.fact_plan_data_vw pf
+		INNER JOIN edw_bi_analytics_vw.dim_date_vw dt ON dt.calendar_dt = pf.plan_dt
+		INNER JOIN vitalDates                   vd ON 1=1
+	WHERE dt.calendar_dt = vd.targetDate
+		AND metric_nm = 'Issued Counts'
+	GROUP BY 1
+),
+aggs AS (
+	SELECT lpf.product_type_cde
+		, COUNT(CASE WHEN lpf.application_issue_dt = vd.targetDate THEN lpf.policy_nr ELSE NULL END) daily_actual
+		, MAX(pl.plan_daily_val) daily_plan
+		, COUNT(CASE WHEN lpf.application_issue_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) mtd_actual
+		, COUNT(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_issue_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) py_mtd_actual
+		, MAX(pl.plan_month_to_dt_val) mtd_plan
+		, COUNT(CASE WHEN lpf.application_issue_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) ytd_actual
+		, COUNT(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_issue_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) py_ytd_actual
+		, MAX(pl.plan_year_to_dt_val) ytd_plan
+		, COUNT(CASE WHEN chan.channel_nm in ('Coverpath','Haven Life','LifeBridge','MMDirect') AND lpf.application_issue_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) ytd_coverpath_actual
+	FROM edw_new_business_vw.fact_life_policy_vw               lpf 
+	       --LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw    iss ON lpf.application_issue_dt = lpf.application_issue_dt
+	       --LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON lpf.product_type_cde = lpf.product_type_cde
+    	   LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid
+	       LEFT OUTER JOIN vitalDates                       vd ON 1=1
+	       LEFT OUTER JOIN plans                            pl ON lpf.product_type_cde = pl.product_type_cde
+	WHERE lpf.product_type_cde <> 'ROP'
+	AND lpf.application_type_nm <> 'Informal'
+	--and chan.distributionChannel = 'MMFA'
+	GROUP BY 1
+),
+total AS (
+	SELECT SUM(daily_actual)        daily_actual
+		, SUM(daily_plan)           daily_plan
+		, SUM(mtd_actual)           mtd_actual
+		, SUM(py_mtd_actual)        py_mtd_actual
+		, SUM(mtd_plan)             mtd_plan
+		, SUM(ytd_actual)           ytd_actual
+		, SUM(py_ytd_actual)        py_ytd_actual
+		, SUM(ytd_plan)             ytd_plan
+		, SUM(ytd_coverpath_actual) ytd_coverpath_actual
+	FROM aggs
+)
+SELECT CASE product_type_cde
+		WHEN 'Whole Life'     THEN 1
+		WHEN 'Term Life'      THEN 2
+		WHEN 'Universal Life' THEN 3
+		WHEN 'Variable Life'  THEN 4
+	END sortOrder --DON'T LOOK AT THIS, IT'S JUST FOR ORDERING
+	, product_type_cde
+	, daily_actual
+	, daily_plan
+	, mtd_actual
+	, ROUND(((mtd_actual - py_mtd_actual) / py_mtd_actual)*100,2) AS mtd_vs_py
+	, ((mtd_actual - mtd_plan) / mtd_plan)           AS mtd_vs_plan
+	, ytd_actual
+	, ROUND(((ytd_actual - py_ytd_actual) / py_ytd_actual)*100,2) AS ytd_vs_py
+	, ((ytd_actual - ytd_plan) / ytd_plan)           AS ytd_vs_plan
+    , ROUND((ytd_coverpath_actual / ytd_actual)*100,2)      AS coverpath_ytd
+FROM aggs
+UNION ALL 
+SELECT 5      AS sortOrder
+	, 'Total' AS product_type_cde
+	, daily_actual
+	, daily_plan
+	, mtd_actual
+	, ROUND(((mtd_actual - py_mtd_actual) / py_mtd_actual)*100,2)  AS mtd_vs_py
+	, ((mtd_actual - mtd_plan) / mtd_plan)           AS mtd_vs_plan
+	, ytd_actual
+	, ROUND(((ytd_actual - py_ytd_actual) / py_ytd_actual)*100,2)  AS ytd_vs_py
+	, ((ytd_actual - ytd_plan) / ytd_plan)           AS ytd_vs_plan
+	, ROUND((ytd_coverpath_actual / ytd_actual)*100,2)        AS coverpath_ytd
+FROM total
+ORDER BY 1;
+
+
+
+
+
+/*issued weghted premium*/
+
+WITH vitalDates AS (
+	SELECT '2022-12-13'::DATE AS targetDate
+),
+plans AS (
+	SELECT pf.product_type_cde 
+	, SUM(pf.plan_daily_val) plan_daily_val
+	, SUM(pf.plan_month_to_dt_val)   plan_month_to_dt_val
+	, SUM(pf.plan_year_to_dt_val)   plan_year_to_dt_val
+	FROM edw_new_business_vw.fact_plan_data_vw pf
+		INNER JOIN edw_bi_analytics_vw.dim_date_vw dt ON dt.calendar_dt = pf.plan_dt
+		INNER JOIN vitalDates                   vd ON 1=1
+	WHERE dt.calendar_dt = vd.targetDate
+		AND metric_nm = 'Issued Wtd Prem'		
+	GROUP BY 1
+),
+aggs AS (
+	SELECT lpf.product_type_cde
+		, SUM(CASE WHEN lpf.application_issue_dt = vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) daily_actual
+		, MAX(pl.plan_daily_val) daily_plan
+		, SUM(CASE WHEN lpf.application_issue_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) mtd_actual
+		, SUM(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_issue_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) py_mtd_actual
+		, MAX(pl.plan_month_to_dt_val) mtd_plan
+		, SUM(CASE WHEN lpf.application_issue_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) ytd_actual
+		, SUM(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_issue_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) py_ytd_actual
+		, MAX(pl.plan_year_to_dt_val) ytd_plan
+		, SUM(CASE WHEN chan.channel_nm in ('Coverpath','Haven Life','LifeBridge','MMDirect') AND lpf.application_issue_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) ytd_coverpath_actual
+	FROM edw_new_business_vw.fact_life_policy_vw               lpf 
+	       --LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw iss ON lpf.application_issue_dt  = lpf.application_issue_dt
+	       --LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw prod ON lpf.product_type_cde = lpf.product_type_cde
+    	   LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw chan ON chan.dim_channel_natural_key_hash_uuid = lpf.dim_channel_natural_key_hash_uuid
+	       LEFT OUTER JOIN vitalDates                       vd ON 1=1
+	       LEFT OUTER JOIN plans                            pl ON lpf.product_type_cde = pl.product_type_cde
+	WHERE lpf.product_type_cde <> 'ROP'
+	AND lpf.application_type_nm <> 'Informal'
+	--AND lpf.distributionChannel = 'MMFA'
+	GROUP BY 1
+),
+total AS (
+	SELECT SUM(daily_actual)        daily_actual
+		, SUM(daily_plan)           daily_plan
+		, SUM(mtd_actual)           mtd_actual
+		, SUM(py_mtd_actual)        py_mtd_actual
+		, SUM(mtd_plan)             mtd_plan
+		, SUM(ytd_actual)           ytd_actual
+		, SUM(py_ytd_actual)        py_ytd_actual
+		, SUM(ytd_plan)             ytd_plan
+		, SUM(ytd_coverpath_actual) ytd_coverpath_actual
+	FROM aggs
+)
+SELECT CASE product_type_cde
+		WHEN 'Whole Life'     THEN 1
+		WHEN 'Term Life'      THEN 2
+		WHEN 'Universal Life' THEN 3
+		WHEN 'Variable Life'  THEN 4
+	END sortOrder --DON'T LOOK AT THIS, IT'S JUST FOR ORDERING
+	, product_type_cde
+	, daily_actual
+	, daily_plan
+	, mtd_actual
+	, ((mtd_actual - py_mtd_actual) / py_mtd_actual) AS mtd_vs_py
+	, ((mtd_actual - mtd_plan) / mtd_plan)           AS mtd_vs_plan
+	, ytd_actual
+	, ((ytd_actual - py_ytd_actual) / py_ytd_actual) AS ytd_vs_py
+	, ((ytd_actual - ytd_plan) / ytd_plan)           AS ytd_vs_plan
+    , (ytd_coverpath_actual / ytd_actual)            AS coverpath_ytd
+FROM aggs
+UNION ALL 
+SELECT 5      AS sortOrder
+	, 'Total' AS product_type_cde
+	, daily_actual
+	, daily_plan
+	, mtd_actual
+	, ((mtd_actual - py_mtd_actual) / py_mtd_actual) AS mtd_vs_py
+	, ((mtd_actual - mtd_plan) / mtd_plan)           AS mtd_vs_plan
+	, ytd_actual
+	, ((ytd_actual - py_ytd_actual) / py_ytd_actual) AS ytd_vs_py
+	, ((ytd_actual - ytd_plan) / ytd_plan)           AS ytd_vs_plan
+	, (ytd_coverpath_actual / ytd_actual)            AS coverpath_ytd
+FROM total
+ORDER BY 1;
+
+
+
+
+
+/*Reported Weighted Premium */
+WITH vitalDates AS (
+    SELECT '2022-12-21'::DATE AS targetDate
+),
+plans AS (
+    SELECT pf.product_type_cde 
+    , SUM(pf.plan_daily_val) plan_daily_val
+    , SUM(pf.plan_month_to_dt_val)   plan_month_to_dt_val
+    , SUM(pf.plan_year_to_dt_val)   plan_year_to_dt_val
+    FROM  edw_new_business_vw.fact_plan_data_vw  pf
+        INNER JOIN edw_bi_analytics_vw.dim_date_vw dt ON dt.calendar_dt = pf.plan_dt
+        INNER JOIN vitalDates                   vd ON 1=1
+    WHERE dt.calendar_dt = vd.targetDate
+        AND metric_nm = 'Reported Premium'
+    GROUP BY 1
+),
+aggs AS (
+    SELECT rpf.product_type
+        , SUM(CASE WHEN rpf.calendar_dt = vd.targetDate THEN rpf.weighted_premium_nr ELSE NULL END) daily_actual
+        , MAX(pl.plan_daily_val) daily_plan
+        , SUM(CASE WHEN rpf.calendar_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN rpf.weighted_premium_nr ELSE NULL END) mtd_actual
+        , SUM(CASE WHEN TIMESTAMPADD('YEAR',1,rpf.calendar_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN rpf.weighted_premium_nr ELSE NULL END) py_mtd_actual
+        , MAX(pl.plan_month_to_dt_val) mtd_plan
+        , SUM(CASE WHEN rpf.calendar_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN rpf.weighted_premium_nr ELSE NULL END) ytd_actual
+        , SUM(CASE WHEN TIMESTAMPADD('YEAR',1,rpf.calendar_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN rpf.weighted_premium_nr ELSE NULL END) py_ytd_actual
+        , MAX(pl.plan_year_to_dt_val) ytd_plan
+        , SUM(CASE WHEN chan.channel_nm in ('Coverpath','Haven Life','LifeBridge','MMDirect') AND rpf.calendar_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN rpf.weighted_premium_nr ELSE NULL END) ytd_coverpath_actual
+    FROM edw_new_business_vw.fact_life_reported_premium_vw    rpf 
+           --LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw rep ON rpf.calendar_dt = rpf.calendar_dt 
+           LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= rpf.dim_channel_natural_key_hash_uuid
+           --LEFT OUTER JOIN edw_new_business_vw.fact_life_policy_vw lpf on lpf.policy_nr = rpf.policy_nr
+           --LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw   prod ON prod.ref_non_standard_product_natural_key_hash_uuid = rpf.ref_non_standard_product_natural_key_hash_uuid
+           LEFT OUTER JOIN vitalDates                       vd ON 1=1
+           LEFT OUTER JOIN plans                            pl ON rpf.product_type  = pl.product_type_cde 
+    WHERE rpf.product_type <> 'ROP'
+    --AND lpf.application_type_nm <> 'Informal'
+        --AND TRIM(chan.channel_nm) = 'EZ-app'
+        --AND rpf.distribution_channel_cde = 'MMFA'
+          -- AND prod.product_type_cde = 'Term Life'
+    GROUP BY 1
+),
+total AS (
+    SELECT SUM(daily_actual)        daily_actual
+        , SUM(daily_plan)           daily_plan
+        , SUM(mtd_actual)           mtd_actual
+        , SUM(py_mtd_actual)        py_mtd_actual
+        , SUM(mtd_plan)             mtd_plan
+        , SUM(ytd_actual)           ytd_actual
+        , SUM(py_ytd_actual)        py_ytd_actual
+        , SUM(ytd_plan)             ytd_plan
+        , SUM(ytd_coverpath_actual) ytd_coverpath_actual
+    FROM aggs
+)
+SELECT CASE product_type
+        WHEN 'Whole Life'     THEN 1
+        WHEN 'Term Life'      THEN 2
+        WHEN 'Universal Life' THEN 3
+        WHEN 'Variable Life'  THEN 4
+    END sortOrder --DON'T LOOK AT THIS, IT'S JUST FOR ORDERING
+    , product_type
+    , ROUND((daily_actual/1000000),2) AS daily_actual
+    , ROUND((daily_plan/1000000),2) AS daily_plan
+    , CAST((mtd_actual/1000000) as decimal(9,2)) AS mtd_actual
+    , ROUND(((mtd_actual - py_mtd_actual) / py_mtd_actual*100),2)AS mtd_vs_py
+    , ROUND(((mtd_actual - mtd_plan) / mtd_plan*100),2)          AS mtd_vs_plan
+    , CAST((ytd_actual/1000000) as decimal(9,2)) AS ytd_actual
+    , ROUND(((ytd_actual - py_ytd_actual) / py_ytd_actual*100),2) AS ytd_vs_py
+    , ROUND(((ytd_actual - ytd_plan) / ytd_plan*100),2)          AS ytd_vs_plan
+    , ROUND((ytd_coverpath_actual / ytd_actual)*100,2)            AS coverpath_ytd
+FROM aggs
+UNION ALL 
+SELECT 5      AS sortOrder
+    , 'Total' AS product_type
+    , ROUND((daily_actual/1000000),2) AS daily_actual
+    , ROUND((daily_plan/1000000),2) AS daily_plan
+    , CAST((mtd_actual/1000000) as decimal(9,2)) AS mtd_actual
+    , ROUND(((mtd_actual - py_mtd_actual) / py_mtd_actual*100),2)AS mtd_vs_py
+    , ROUND(((mtd_actual - mtd_plan) / mtd_plan*100),2)          AS mtd_vs_plan
+    , CAST((ytd_actual/1000000) as decimal(9,2)) AS ytd_actual
+    , ROUND(((ytd_actual - py_ytd_actual) / py_ytd_actual*100),2) AS ytd_vs_py
+    , ROUND(((ytd_actual - ytd_plan) / ytd_plan*100),2)          AS ytd_vs_plan
+    , ROUND((ytd_coverpath_actual / ytd_actual)*100,2)            AS coverpath_ytd
+FROM total
+ORDER BY 1;

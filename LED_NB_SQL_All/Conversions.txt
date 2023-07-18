@@ -1,0 +1,221 @@
+ /*Submitted cases, conversions*/
+WITH vitalDates AS (
+    SELECT '2022-12-18'::DATE AS targetDate
+),
+plans AS (
+    SELECT  SUM(pf.plan_daily_val) dailyKPIPlan
+        , SUM(pf.plan_month_to_dt_val)   mtdKPIPlan
+        , SUM(pf.plan_year_to_dt_val)   ytdKPIPlan
+    FROM edw_new_business_vw.fact_plan_data_vw         pf
+         INNER JOIN edw_bi_analytics_vw.dim_date_vw  isd ON isd.calendar_dt = pf.plan_dt
+       INNER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= pf.fact_plan_data_natural_key_hash_uuid
+        INNER JOIN vitalDates                     vd ON 1=1
+    WHERE isd.calendar_dt = vd.targetDate
+        AND pf.metric_nm = 'Conversion Counts'
+        --AND pf.product_type_cde = 'Whole Life'
+    --GROUP BY 1
+),
+aggs AS (
+    SELECT COUNT(CASE WHEN lpf.application_submit_dt = vd.targetDate THEN lpf.policy_nr ELSE NULL END) daily_actual
+        , MAX(pl.dailyKPIPlan) daily_plan
+        , COUNT(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) mtd_actual
+        , COUNT(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) py_mtd_actual
+        , MAX(pl.mtdKPIPlan) mtd_plan
+        , COUNT(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) ytd_actual
+        , COUNT(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) py_ytd_actual
+        , MAX(pl.ytdKPIPlan) ytd_plan
+        , COUNT(CASE WHEN chan.channel_nm = 'Coverpath' AND lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.policy_nr ELSE NULL END) ytd_coverpath_actual
+    FROM edw_new_business_vw.fact_life_policy_vw                lpf 
+           LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw 		     prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+           LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+           LEFT OUTER JOIN vitalDates                       vd ON 1=1
+           LEFT OUTER JOIN plans                           pl ON 1=1 --prod.productType = pl.productType
+    WHERE prod.product_type_cde <> 'ROP'
+        AND lpf.application_type_nm = 'Conversion'
+        and lpf.application_type_nm <> 'Informal'
+        --AND prod.product_type_cde = 'Whole Life'
+    --GROUP BY 1
+)
+SELECT daily_actual
+    , daily_plan
+    , mtd_actual
+    , ((mtd_actual - py_mtd_actual) / NULLIFZERO(py_mtd_actual)) AS mtd_vs_py
+    , ((mtd_actual - mtd_plan) / NULLIFZERO(mtd_plan))           AS mtd_vs_plan
+    , ytd_actual
+    , ((ytd_actual - py_ytd_actual) / NULLIFZERO(py_ytd_actual)) AS ytd_vs_py
+    , ((ytd_actual - ytd_plan) / NULLIFZERO(ytd_plan))           AS ytd_vs_plan
+    , (ytd_coverpath_actual / NULLIFZERO(ytd_actual))            AS coverpath_ytd
+FROM aggs
+ORDER BY 1;
+
+
+/*Submitted premium, conversions*/
+WITH vitalDates AS (
+SELECT '2022-12-18'::DATE AS targetDate
+),
+plans AS (
+SELECT /*pf.productType
+, */SUM(pf.plan_daily_val) dailyKPIPlan
+, SUM(pf.plan_month_to_dt_val) mtdKPIPlan
+, SUM(pf.plan_year_to_dt_val) ytdKPIPlan
+FROM edw_new_business_vw.fact_plan_data_vw pf
+INNER JOIN edw_bi_analytics_vw.dim_date_vw  isd ON isd.calendar_dt = pf.plan_dt
+INNER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= pf.fact_plan_data_natural_key_hash_uuid
+--FROM edw_bi_analytics_vw.planDataFact pf
+--INNER JOIN edw_bi_analytics_vw.dimDates dt ON dt.dateKey = pf.planDateKey
+----INNER JOIN edw_bi_analytics_vw.dimDates   dt ON dt.dateKey = pf.planDateKey
+--        INNER JOIN edw_bi_analytics_vw.dimChannel dc ON pf.channelKey = dc.channelKey        
+INNER JOIN vitalDates vd ON 1=1
+WHERE isd.calendar_dt = vd.targetDate
+AND pf.metric_nm = 'Conversion Wtd Prem'
+ --and pf.distributionChannel = ''
+ --and pf.channel_nm = 'Coverpath'
+),
+aggs AS (
+SELECT /* prod.productType
+,*/ SUM(CASE WHEN lpf.application_submit_dt = vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) daily_actual
+, MAX(pl.dailyKPIPlan) daily_plan
+, SUM(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) mtd_actual
+, SUM(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('MONTH',vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) py_mtd_actual
+, MAX(pl.mtdKPIPlan) mtd_plan
+, SUM(CASE WHEN lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) ytd_actual
+, SUM(CASE WHEN TIMESTAMPADD('YEAR',1,lpf.application_submit_dt) BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) py_ytd_actual
+, MAX(pl.ytdKPIPlan) ytd_plan
+, SUM(CASE WHEN chan.channel_nm = 'Coverpath' AND lpf.application_submit_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate THEN lpf.annualized_premium_amt ELSE NULL END) ytd_coverpath_actual
+FROM edw_new_business_vw.fact_life_policy_vw                lpf 
+           LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw 		     prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+           LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+           LEFT OUTER JOIN vitalDates                       vd ON 1=1
+           LEFT OUTER JOIN plans                          pl ON 1=1
+WHERE prod.product_type_cde <> 'ROP'
+AND lpf.application_type_nm = 'Conversion'
+ --and lpf.distributionChannel = 'Unknown'
+ --and chan.channel_nm = 'Coverpath'
+        --AND pf.productType = 'Whole Life'
+--AND prod.productType = 'Whole Life'
+--GROUP BY 1
+)
+SELECT  ROUND(daily_actual/1000000,2) as daily_actual
+, ROUND(daily_plan/1000000,2) as daily_actual
+, ROUND(mtd_actual/1000000,2) as mtd_actual
+, ROUND(((mtd_actual - py_mtd_actual) / NULLIFZERO(py_mtd_actual))*100,2) AS mtd_vs_py
+, ROUND(((mtd_actual - mtd_plan) / NULLIFZERO(mtd_plan))*100,2) AS mtd_vs_plan
+, ROUND(ytd_actual/1000000,2) as mtd_actual
+, ROUND(((ytd_actual - py_ytd_actual) / NULLIFZERO(py_ytd_actual))*100,2) AS ytd_vs_py
+, ROUND(((ytd_actual - ytd_plan) / NULLIFZERO(ytd_plan))*100,2) AS ytd_vs_plan
+, ROUND(((ytd_coverpath_actual) / NULLIFZERO(ytd_actual))*100,2) AS coverpath_ytd
+FROM aggs
+ORDER BY 1;
+
+
+
+
+
+
+
+
+/*Conversion cycle time (MTD)*/
+WITH vitalDates AS (
+	SELECT '2023-01-16'::DATE AS targetDate
+),
+aggs AS (
+	SELECT DATE_TRUNC('MONTH',isd.calendar_dt) AS issueMonth
+		, COUNT(policy_nr) AS issuedCount
+		, Sum(received_to_issues_nr) / COUNT(policy_nr) AS allConversions
+		, Sum(CASE WHEN lpf.fully_underwritten_ind IS TRUE THEN received_to_issues_nr ELSE NULL END)/ count(CASE WHEN lpf.fully_underwritten_ind IS TRUE THEN policy_nr ELSE NULL END) as conversionsWUW
+		,sum(CASE WHEN lpf.fully_underwritten_ind IS FALSE THEN received_to_issues_nr ELSE NULL END)/ count((CASE WHEN lpf.fully_underwritten_ind IS false THEN policy_nr ELSE NULL END) ) as conversionsWOUWbwo
+		, sum(CASE WHEN lpf.fully_underwritten_ind IS FALSE and lpf.bingo_cde = 'BINGO' THEN received_to_issues_nr ELSE NULL END)/ count(CASE WHEN lpf.fully_underwritten_ind IS FALSE and lpf.bingo_cde = 'BINGO' THEN policy_nr ELSE NULL END) AS goodCycleTime
+		,sum(CASE WHEN lpf.bingo_cde =  'NIGO' THEN received_to_issues_nr ELSE NULL END)/ count(CASE WHEN lpf.bingo_cde =  'NIGO' THEN policy_nr ELSE NULL END) AS badCycleTime
+		--, sum(received_to_issues_nr) AS signedToIssued
+	FROM edw_new_business_vw.fact_life_policy_vw                 lpf 
+     LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw  isd ON isd.calendar_dt = lpf.application_issue_dt 
+	 LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw 		     prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+	       LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+	       LEFT OUTER JOIN vitalDates                       vd ON 1=1
+	WHERE lpf.product_type_cde <> 'ROP'
+		AND (isd.calendar_dt BETWEEN DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR',-1,vd.targetDate)) AND TIMESTAMPADD('YEAR',-1,vd.targetDate)
+			OR isd.calendar_dt BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate)
+		AND DATE_PART('MONTH',lpf.application_issue_dt) = DATE_PART('MONTH',vd.targetDate)
+		AND lpf.application_type_nm = 'Conversion'
+		 and lpf.application_type_nm <> 'Informal'
+	GROUP BY 1
+)
+SELECT issueMonth
+	, issuedCount
+	, allConversions
+	, conversionsWUW
+	, conversionsWOUWbwo
+	, goodCycleTime
+	, badCycleTime
+FROM aggs
+ORDER BY 1;
+
+
+
+
+
+
+/*Conversion cycle time (YTD)*/
+WITH vitalDates AS (
+    SELECT '2023-01-16'::DATE AS targetDate
+),
+aggs AS (
+    SELECT DATE_TRUNC('YEAR',isd.calendar_dt) AS issueYear
+        , COUNT(policy_nr) AS issuedCount
+        , Sum(received_to_issues_nr) / COUNT(policy_nr) AS allConversions
+        , Sum(CASE WHEN lpf.fully_underwritten_ind IS TRUE THEN received_to_issues_nr ELSE NULL END)/ count(CASE WHEN lpf.fully_underwritten_ind IS TRUE THEN policy_nr ELSE NULL END) as conversionsWUW
+        ,sum(CASE WHEN lpf.fully_underwritten_ind IS FALSE THEN received_to_issues_nr ELSE NULL END)/ count((CASE WHEN lpf.fully_underwritten_ind IS false THEN policy_nr ELSE NULL END) ) as conversionsWOUWbwo
+        , sum(CASE WHEN lpf.fully_underwritten_ind IS FALSE and lpf.bingo_cde = 'BINGO' THEN received_to_issues_nr ELSE NULL END)/ count(CASE WHEN lpf.fully_underwritten_ind IS FALSE and lpf.bingo_cde = 'BINGO' THEN policy_nr ELSE NULL END) AS goodCycleTime
+        , sum(CASE WHEN lpf.bingo_cde =  'NIGO' THEN received_to_issues_nr ELSE NULL END)/ count(CASE WHEN lpf.bingo_cde =  'NIGO' THEN policy_nr ELSE NULL END) AS badCycleTime
+        --, sum(received_to_issues_nr) AS signedToIssued
+    FROM edw_new_business_vw.fact_life_policy_vw                 lpf
+           LEFT OUTER JOIN edw_bi_analytics_vw.dim_date_vw  isd ON isd.calendar_dt = lpf.application_issue_dt
+           LEFT OUTER JOIN edw_ref_non_standard_vw.ref_non_standard_product_current_vw              prod ON prod.ref_non_standard_product_natural_key_hash_uuid = lpf.ref_non_standard_product_natural_key_hash_uuid
+           LEFT OUTER JOIN edw_semantic_vw.sem_channel_nb_current_vw        chan on chan.dim_channel_natural_key_hash_uuid= lpf.dim_channel_natural_key_hash_uuid
+           LEFT OUTER JOIN vitalDates                       vd ON 1=1
+    WHERE prod.product_type_cde <> 'ROP' AND
+         (isd.calendar_dt BETWEEN  DATE_TRUNC('YEAR', TIMESTAMPADD('YEAR',-1,vd.targetDate)) AND TIMESTAMPADD('YEAR',-1,vd.targetDate)
+            OR isd.calendar_dt  BETWEEN DATE_TRUNC('YEAR', vd.targetDate) AND vd.targetDate)
+        AND lpf.application_type_nm = 'Conversion'
+        and lpf.application_type_nm <> 'Informal'
+    GROUP BY 1
+)
+SELECT issueYear
+    , issuedCount
+    , allConversions
+    , conversionsWUW
+    --, conversionsWOUW
+    ,conversionsWOUWbwo
+    , goodCycleTime
+    , badCycleTime
+FROM aggs
+ORDER BY 1;
+	
+					
+					
+				
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+
+
+
+
+
+
+
+
+
+
+
+
+
